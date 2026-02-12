@@ -44,7 +44,11 @@ class AdaptiveQuantizer(nn.Module):
         # importance=0 => bg_levels, importance=1 => roi_levels.
         level_span = float(self.roi_levels - self.bg_levels)
         level_map = float(self.bg_levels) + (importance_map_latent * level_span)
-        level_map = level_map.round().clamp(min=2.0)
+        
+        # Apply Straight-Through Estimator (STE) to allow gradients to flow through rounding
+        level_map_rounded = level_map.round().clamp(min=2.0)
+        level_map = level_map + (level_map_rounded - level_map).detach()
+        
         max_code_map = level_map - 1.0
 
         q_code = torch.round(x_norm * max_code_map).clamp(min=0.0)

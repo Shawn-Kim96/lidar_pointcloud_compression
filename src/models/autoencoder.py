@@ -6,13 +6,13 @@ import torch.nn.functional as F
 def _activation(name: str) -> nn.Module:
     name = (name or "relu").lower()
     if name == "relu":
-        return nn.ReLU(inplace=True)
+        return nn.ReLU(inplace=False)
     if name in ("silu", "swish"):
-        return nn.SiLU(inplace=True)
+        return nn.SiLU(inplace=False)
     if name == "gelu":
         return nn.GELU()
     if name in ("leaky_relu", "lrelu"):
-        return nn.LeakyReLU(negative_slope=0.1, inplace=True)
+        return nn.LeakyReLU(negative_slope=0.1, inplace=False)
     raise ValueError(f"Unknown activation: {name}")
 
 
@@ -206,6 +206,8 @@ class Decoder(nn.Module):
         x = self.final_conv(x)
         return x # Range, x, y, z, remission
 
+from models.backbones import DarkNetEncoder
+
 class RangeCompressionModel(nn.Module):
     def __init__(
         self,
@@ -218,18 +220,43 @@ class RangeCompressionModel(nn.Module):
         norm="batch",
         activation="relu",
         dropout=0.0,
+        backbone_type="resnet", # "resnet" or "darknet"
     ):
         super(RangeCompressionModel, self).__init__()
-        self.encoder = Encoder(
-            in_channels=in_channels,
-            latent_channels=latent_channels,
-            base_channels=base_channels,
-            num_stages=num_stages,
-            blocks_per_stage=blocks_per_stage,
-            norm=norm,
-            activation=activation,
-            dropout=dropout,
-        )
+        
+        if backbone_type == "darknet":
+            # DarkNet-21 like structure: 5 stages of downsampling (32x total)
+            self.encoder = DarkNetEncoder(
+                in_channels=in_channels,
+                base_channels=32, # Starts smaller but doubles effectively
+                layers=(1, 1, 2, 2, 1), # Standard DarkNet-21 (tiny/variant)
+                norm=norm,
+                activation=activation
+            )
+            # DarkNet Output Channels: 32 * 2^5 = 1024
+            # We need to project this to latent_channels
+            self.feature_projection = nn.Sequential(
+                nn.Conv2d(1024, latent_channels, kernel_size=1, bias=False),
+                _norm(norm, latent_channels),
+                _activation(activation)
+            )
+            self.backbone_type = "darknet"
+            # Decoder needs to upsample 5 times (32x)
+            num_stages = 5 
+        else:
+            self.encoder = Encoder(
+                in_channels=in_channels,
+                latent_channels=latent_channels,
+                base_channels=base_channels,
+                num_stages=num_stages,
+                blocks_per_stage=blocks_per_stage,
+                norm=norm,
+                activation=activation,
+                dropout=dropout,
+            )
+            self.feature_projection = nn.Identity()
+            self.backbone_type = "resnet"
+
         self.decoder = Decoder(
             latent_channels=latent_channels,
             out_channels=in_channels,
@@ -243,7 +270,11 @@ class RangeCompressionModel(nn.Module):
         
     def forward(self, x, noise_std=0.0, quantize=None):
         # x: [B, 5, H, W]
-        latent = self.encoder(x)
+        if self.backbone_type == "darknet":
+            features = self.encoder(x) # [B, 1024, H/32, W/32]
+            latent = self.feature_projection(features)
+        else:
+            latent = self.encoder(x)
         
         # Add quantization-aware noise or transmission noise
         if self.training and noise_std > 0.0:
