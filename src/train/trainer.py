@@ -140,6 +140,12 @@ class Trainer:
 
     def run(self, epochs, save_dir):
         os.makedirs(save_dir, exist_ok=True)
+        
+        # Save config
+        import yaml
+        with open(os.path.join(save_dir, "config.yaml"), "w") as f:
+            yaml.dump(self.config, f, default_flow_style=False)
+            
         for epoch in range(epochs):
             avg_loss = self.train_epoch(epoch)
             print(f"Epoch {epoch}: Loss {avg_loss:.4f}")
