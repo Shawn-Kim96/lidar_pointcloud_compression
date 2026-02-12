@@ -43,7 +43,9 @@ def parse_args():
     
     # Toggles
     parser.add_argument("--no_teacher", action="store_true", help="Disable teacher for Stage 1 training")
+    parser.add_argument("--no_teacher", action="store_true", help="Disable teacher for Stage 1 training")
     parser.add_argument("--run_id", type=str, default=None, help="Optional run identifier")
+    parser.add_argument("--checkpoint", type=str, default=None, help="Path to checkpoint to resume/finetune from")
 
     return parser.parse_args()
 
@@ -122,6 +124,21 @@ def main():
         device=device,
         train_loader=train_loader
     )
+    
+    # Load Checkpoint if provided
+    if args.checkpoint:
+        if os.path.isfile(args.checkpoint):
+            print(f"Loading checkpoint from {args.checkpoint}...")
+            checkpoint = torch.load(args.checkpoint, map_location=device)
+            # Handle both state_dict or full checkpoint dict
+            state_dict = checkpoint if not "model_state_dict" in checkpoint else checkpoint["model_state_dict"]
+            try:
+                trainer.model.load_state_dict(state_dict, strict=False)
+                print("Checkpoint loaded successfully.")
+            except RuntimeError as e:
+                print(f"Warning: Error loading state_dict: {e}")
+        else:
+            print(f"Warning: Checkpoint file {args.checkpoint} not found. Training from scratch.")
     
     print("Starting Training...")
     trainer.run(args.epochs, args.save_dir)
