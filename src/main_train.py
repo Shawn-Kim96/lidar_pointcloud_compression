@@ -13,6 +13,12 @@ from dataset.semantickitti_loader import SemanticKittiDataset
 import models.compression
 import models.backbones
 
+def _safe_token(value):
+    text = str(value).strip().replace(" ", "")
+    text = text.replace("/", "-")
+    return "".join(ch for ch in text if ch.isalnum() or ch in ("-", "_", "."))
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="LiDAR Compression Training")
     
@@ -43,11 +49,40 @@ def parse_args():
     
     # Toggles
     parser.add_argument("--no_teacher", action="store_true", help="Disable teacher for Stage 1 training")
-    parser.add_argument("--no_teacher", action="store_true", help="Disable teacher for Stage 1 training")
     parser.add_argument("--run_id", type=str, default=None, help="Optional run identifier")
     parser.add_argument("--checkpoint", type=str, default=None, help="Path to checkpoint to resume/finetune from")
 
     return parser.parse_args()
+
+def _print_experiment_summary(args, device, save_dir):
+    stage_label = "1" if args.no_teacher else "2"
+    mode_label = "baseline" if args.no_teacher else "distill"
+    teacher_backend = "none" if args.no_teacher else args.teacher_backend
+    print("============================================================")
+    print("[Experiment Metadata]")
+    print(f"stage: {stage_label}")
+    print(f"training_mode: {mode_label}")
+    print(f"backbone: {args.backbone}")
+    print(f"teacher_backend: {teacher_backend}")
+    print(f"run_id: {args.run_id}")
+    print(f"save_dir: {save_dir}")
+    print(f"device: {device}")
+    print(f"dataset_root: {args.data_root}")
+    print(f"epochs: {args.epochs}")
+    print(f"batch_size: {args.batch_size}")
+    print(f"num_workers: {args.num_workers}")
+    print(f"lr: {args.lr}")
+    print(f"roi_levels: {args.roi_levels}")
+    print(f"bg_levels: {args.bg_levels}")
+    print(
+        "loss_weights: "
+        f"recon={args.lambda_recon}, "
+        f"rate={args.lambda_rate}, "
+        f"distill={args.lambda_distill}, "
+        f"importance={args.lambda_importance}"
+    )
+    print(f"checkpoint: {args.checkpoint if args.checkpoint else 'none'}")
+    print("============================================================")
 
 def main():
     args = parse_args()
@@ -64,22 +99,43 @@ def main():
     # Save Dir Logic
     if args.save_dir is None:
         import time
-        date_str = time.strftime("%Y%m%d")
-        run_id = args.run_id or time.strftime("%H%M%S")
-        exp_name = f"stage1_{args.backbone}" if args.no_teacher else f"stage2_{args.backbone}_distill"
-        args.save_dir = os.path.join("data", "results", "experiments", f"{date_str}_{exp_name}_{run_id}")
+        date_str = time.strftime("%y%m%d")
+        run_id = _safe_token(args.run_id or time.strftime("%H%M%S"))
+        mode = "solo" if args.no_teacher else "distill"
+        exp_tokens = [
+            date_str,
+            _safe_token(args.backbone),
+            mode,
+            f"lr{_safe_token(args.lr)}",
+            f"bs{args.batch_size}",
+            run_id,
+        ]
+        args.save_dir = os.path.join("data", "results", "experiments", "_".join(exp_tokens))
     
     print(f"Saving checkpoints to: {args.save_dir}")
+    _print_experiment_summary(args, device, args.save_dir)
+
+    if args.backbone not in ("darknet", "resnet"):
+        raise ValueError(f"Unsupported backbone '{args.backbone}'. Use one of: darknet, resnet")
+
+    backbone_config = {
+        "name": args.backbone,
+        "in_channels": 5,
+    }
+    decoder_stages = 5 if args.backbone == "darknet" else 4
+    if args.backbone == "darknet":
+        backbone_config["layers"] = (1, 1, 2, 2, 1)
+    else:
+        # Encoder in autoencoder.py expects stage count/blocks, not "layers".
+        backbone_config["latent_channels"] = 64
+        backbone_config["num_stages"] = 4
+        backbone_config["blocks_per_stage"] = 1
 
     # Config Construction
     config = {
         "model": {
             "name": "lidar_compression",
-            "backbone_config": {
-                "name": args.backbone, 
-                "in_channels": 5,
-                "layers": (1, 1, 2, 2, 1) if args.backbone == "darknet" else (1,1,1,1)
-            },
+            "backbone_config": backbone_config,
             "quantizer_config": {
                 "roi_levels": args.roi_levels,
                 "bg_levels": args.bg_levels,
@@ -88,7 +144,7 @@ def main():
             "decoder_config": {
                 "latent_channels": 64,
                 "out_channels": 5,
-                "num_stages": 5 if args.backbone == "darknet" else 4
+                "num_stages": decoder_stages
             },
             "head_config": {
                 "hidden_channels": 32,
