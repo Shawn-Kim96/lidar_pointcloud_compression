@@ -1,34 +1,59 @@
-%%%%%
-%% Use \section{Title of appendix} to start a new appendix. Appendices are optional. 
-%% If none are present, comment out "" in main.tex
-%%%%%
+\section{Reproducibility Configuration}\label{apx:repro}
+This appendix lists experiment scripts and default settings used in the current thesis draft.
 
+\begin{table}[!htb]
+\caption{Primary experiment scripts and defaults}
+\label{tab:appendix-scripts}
+\centering
+\small
+\begin{tabular}{l l l}
+\toprule
+\textbf{Stage} & \textbf{Script} & \textbf{Key defaults} \\
+\midrule
+Stage0 &
+\texttt{src/scripts/run\_uniform\_baseline.sh} &
+\texttt{quantizer\_mode=uniform}, bits sweep \{4,6,8\}, \\
+&& \texttt{lambda\_recon=1.0}, others 0 \\
+Stage1 &
+\texttt{src/scripts/run\_stage1.sh} &
+\texttt{balanced\_v1}, \texttt{normalized\_global}, \\
+&& \texttt{weighted\_bce}, \texttt{roi\_target\_mode=maxpool} \\
+Stage2 &
+\texttt{src/scripts/run\_stage2.sh} &
+\texttt{balanced\_v2}, \texttt{normalized\_bg}, \\
+&& \texttt{lambda\_distill} sweep \{0.1,0.5,1.0\} \\
+Stage3 &
+\texttt{src/scripts/run\_stage3\_multiscale\_heads.sh} &
+Head sweep \{\texttt{bifpn}, \texttt{deformable\_msa}, \\
+&& \texttt{dynamic}, \texttt{rangeformer}, \texttt{frnet}\} \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-\section{What Should Be Included in Appendices}\label{apx:appendix1}
+\subsection{Teacher setup}
+Teacher backend for Stage2/3 is \texttt{pointpillars\_zhulf}, using checkpoint:
+\begin{equation}
+\texttt{data/checkpoints/pointpillars\_epoch\_160.pth}.
+\end{equation}
 
-Appendices should contain information that is too lengthy to be included in the thesis chapters but further support the conclusions of the thesis. For example, one could include additional experimental results in the form of tables or additional figures. Each appendix should start with a paragraph introducing the items being presented. Additionally, each table or figure should be preceded by a paragraph that explains the data being presented and the conclusions that can be drawn from them. Please note that data already presented in the main thesis should not be repeated in an appendix. One cannot, for example, include the results of an experiment as a figure in the thesis and again as a table in the appendix. One can, however, include detailed results in tables in the appendix and a summary figure in the thesis portraying only the ``best" results.
+\section{Intermediate Artifact Index}\label{apx:artifacts}
+The following files were used to build the tables and intermediate analysis in this draft:
+\begin{itemize}
+    \item \texttt{src/results/experiments\_result.csv}
+    \item \texttt{src/results/experiments\_result.md}
+    \item \texttt{docs/report/experiments.md}
+    \item \texttt{docs/notes/research\_progress.md}
+    \item \texttt{notebooks/quick\_eval\_summary\_16frames.csv}
+    \item \texttt{notebooks/oracle\_eval\_summary\_260219\_resnet\_pilot\_s1adapt.csv}
+    \item \texttt{notebooks/oracle\_eval\_summary\_260219\_resnet\_pilot\_s2distill.csv}
+    \item \texttt{notebooks/matched\_bitrate\_pairs\_260219\_pilot.csv}
+\end{itemize}
 
-\subsection{Subsections in Appendices}\label{apx:appendix1:subsections}
-
-It is possible, and advisable, to use (multiple levels of) subsections in an Appendix. The main Appendix sections may be optionally titled. They will automatically be assigned Appendix A, Appendix B, etc. If a title is present, it will appear on the next line in the appendix and on the same line in the TOC. Sub-sections will be listed in the TOC as A.1, A.2, etc.
-
-Figures, such as \figurename~\ref{fig:nonzero-distr}, should only be referenced in the appendix. The thesis content can point to an appendix but not specifically reference a table or figure in the appendix.
-
-\begin{figure}[tbh]
-  \centering
-  \includegraphics[width=0.6\textwidth]{figures/hist-rows.pdf}
-  \caption{Distribution of sample non-zeros.}
-  \label{fig:nonzero-distr}
-\end{figure}
-
-
-\section{Title of Another Appendix}\label{apx:appendix2}
-
-Different appendices should cover unrelated topics. If the appendices are on the same topic, they should just be sub-sections within the same appendix. 
-
-\begin{figure}[tbh]
-  \centering
-  \includegraphics[width=0.85\textwidth]{figures/speedup2-nbase.pdf}
-  \caption{Speedup comparison of our method against baselines.}
-  \label{fig:speedup}
-\end{figure}
+\section{Planned Figures for Next Draft}\label{apx:planned-figures}
+This version intentionally omits figures. The next draft should include:
+\begin{itemize}
+    \item threshold sweep plots (precision, recall, IoU vs threshold) per Stage1/2 run,
+    \item bitrate-distortion plots (native vs oracle ROI and uniform matched-budget),
+    \item qualitative ROI visualization panels:
+    input range/intensity, ground-truth ROI mask, predicted importance map, predicted ROI binary map.
+\end{itemize}
