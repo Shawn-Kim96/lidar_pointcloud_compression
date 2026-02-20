@@ -32,10 +32,11 @@ def _norm(kind: str, channels: int) -> nn.Module:
 
 
 class QuantizationLayer(nn.Module):
-    def __init__(self, bits=8, eps=1e-6):
+    def __init__(self, bits=8, eps=1e-6, use_ste=False):
         super(QuantizationLayer, self).__init__()
         self.bits = bits
         self.eps = eps
+        self.use_ste = bool(use_ste)
 
     def forward(self, x):
         # Per-sample affine quantization into [0, 2^bits - 1]
@@ -45,6 +46,8 @@ class QuantizationLayer(nn.Module):
         scale = levels / (x_max - x_min + self.eps)
         q = torch.round((x - x_min) * scale).clamp(0, levels)
         deq = q / scale + x_min
+        if self.use_ste:
+            deq = x + (deq - x).detach()
         return deq, q
 
 class ResidualBlock(nn.Module):
@@ -109,7 +112,8 @@ class Encoder(nn.Module):
             _activation(self.activation),
         )
 
-        layers = []
+        stage_layers = []
+        self.stage_channels = []
         in_ch = self.base_channels
         for stage in range(self.num_stages):
             if stage < (self.num_stages - 1):
@@ -118,7 +122,7 @@ class Encoder(nn.Module):
                 out_ch = self.latent_channels
 
             # Downsample block
-            layers.append(
+            blocks = [
                 ResidualBlock(
                     in_channels=in_ch,
                     out_channels=out_ch,
@@ -127,10 +131,10 @@ class Encoder(nn.Module):
                     activation=self.activation,
                     dropout=self.dropout,
                 )
-            )
+            ]
             # Extra blocks at same resolution
             for _ in range(max(0, self.blocks_per_stage - 1)):
-                layers.append(
+                blocks.append(
                     ResidualBlock(
                         in_channels=out_ch,
                         out_channels=out_ch,
@@ -140,13 +144,21 @@ class Encoder(nn.Module):
                         dropout=self.dropout,
                     )
                 )
+            stage_layers.append(nn.Sequential(*blocks))
+            self.stage_channels.append(out_ch)
             in_ch = out_ch
 
-        self.layers = nn.Sequential(*layers)
+        self.stage_layers = nn.ModuleList(stage_layers)
+        self.layers = nn.Sequential(*stage_layers)
         
-    def forward(self, x):
+    def forward(self, x, return_features: bool = False):
         x = self.initial_conv(x)
-        x = self.layers(x)
+        features = []
+        for stage in self.stage_layers:
+            x = stage(x)
+            features.append(x)
+        if return_features:
+            return x, features
         return x
 
 class Decoder(nn.Module):

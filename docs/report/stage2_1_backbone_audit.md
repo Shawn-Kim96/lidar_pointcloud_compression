@@ -48,3 +48,25 @@ Notes:
 ## Decision
 - Keep current Stage1 as internal control baseline.
 - For Stage2.1 primary path, prefer a **moderate capacity step** (`bp2` family) plus improved task-aware objectives (teacher distillation + deployable importance map), before moving to very heavy channel scaling.
+
+## 2026-02-14 Update (ROI/Importance Discussion)
+
+### Problem signal
+- Importance prediction can collapse to near-minimum values, producing empty ROI predictions at common thresholds.
+- One major contributor is sparse ROI supervision being downsampled with `nearest` under aggressive spatial compression.
+
+### Implemented change
+- Added configurable ROI target downsampling for importance supervision:
+  - `nearest`, `maxpool`, `area(soft)`.
+- Default set to `maxpool` to preserve sparse positives at low latent resolution.
+
+### Architecture direction (agreed)
+0. Add explicit **uniform quantization baseline (Stage0)** for ROI-unaware reference.
+1. Multi-stage ROI estimation (higher-resolution feature fusion) is worth pursuing.
+2. Keep **single-bottleneck quantization** first for controlled ablation.
+3. Consider multi-stage quantization only after ROI prediction quality is stabilized.
+
+### Implementation status snapshot
+- Stage0/1/2 parallel sweep scripts are wired.
+- Stage2 distillation loss path is connected in trainer (feature + logit distill with ROI/teacher weighting).
+- Uniform quantizer path supports STE for train-time optimization.

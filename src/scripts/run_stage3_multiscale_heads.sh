@@ -1,5 +1,17 @@
 #!/bin/bash
-#SBATCH --job-name=lidar_distill
+# Stage3-style ablation over modern multi-scale ROI heads.
+#
+# Head variants:
+#   0: bifpn
+#   1: deformable_msa
+#   2: dynamic
+#   3: rangeformer
+#   4: frnet
+#
+# Usage:
+#   sbatch src/scripts/run_stage3_multiscale_heads.sh
+
+#SBATCH --job-name=lidar_stage3
 #SBATCH --output=logs/slurm_%A_%a.out
 #SBATCH --error=logs/slurm_%A_%a.err
 #SBATCH --partition=gpuqm
@@ -8,11 +20,10 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
 #SBATCH --time=24:00:00
-#SBATCH --array=0-2
+#SBATCH --array=0-4
 
 set -euo pipefail
 
-# Create logs directory
 mkdir -p logs
 
 CONDA_ENV=${CONDA_ENV:-lidarcomp311}
@@ -24,32 +35,32 @@ else
   PYTHON_ENV_DESC="python:$(command -v python)"
 fi
 
-# Define Experiment Arrays
-# We sweep over Distillation Weights
-# Run 0: Balanced (0.5)
-# Run 1: High Distill (1.0)
-# Run 2: Low Distill (0.1)
-LAMBDA_DISTILLS=(0.5 1.0 0.1)
+HEAD_TYPES=("bifpn" "deformable_msa" "dynamic" "rangeformer" "frnet")
+HEAD_TYPE=${HEAD_TYPES[$SLURM_ARRAY_TASK_ID]}
 
-# Shared training params
-BACKBONE=${BACKBONE:-darknet}
+BACKBONE=${BACKBONE:-resnet}
 TEACHER_BACKEND=${TEACHER_BACKEND:-pointpillars_zhulf}
 TEACHER_PROXY_CKPT=${TEACHER_PROXY_CKPT:-data/checkpoints/pointpillars_epoch_160.pth}
-EPOCHS=${EPOCHS:-50}
+EPOCHS=${EPOCHS:-150}
 BATCH_SIZE=${BATCH_SIZE:-4}
 NUM_WORKERS=${NUM_WORKERS:-4}
 MAX_TRAIN_FRAMES=${MAX_TRAIN_FRAMES:-0}
 LR=${LR:-1e-4}
+
 ROI_LEVELS=${ROI_LEVELS:-256}
 BG_LEVELS=${BG_LEVELS:-16}
 ROI_TARGET_MODE=${ROI_TARGET_MODE:-maxpool}
 QUANTIZER_MODE=${QUANTIZER_MODE:-adaptive}
 QUANT_BITS=${QUANT_BITS:-8}
+IMPORTANCE_HIDDEN_CHANNELS=${IMPORTANCE_HIDDEN_CHANNELS:-64}
+
 L_RECON=${L_RECON:-1.0}
 L_RATE=${L_RATE:-0.02}
+L_DISTILL=${L_DISTILL:-0.1}
 L_IMPORTANCE=${L_IMPORTANCE:-1.0}
 L_IMP_SEPARATION=${L_IMP_SEPARATION:-0.2}
 IMP_SEPARATION_MARGIN=${IMP_SEPARATION_MARGIN:-0.05}
+
 LOSS_RECIPE=${LOSS_RECIPE:-balanced_v2}
 RATE_LOSS_MODE=${RATE_LOSS_MODE:-normalized_bg}
 IMPORTANCE_LOSS_MODE=${IMPORTANCE_LOSS_MODE:-weighted_bce}
@@ -60,32 +71,25 @@ DISTILL_LOGIT_LOSS=${DISTILL_LOGIT_LOSS:-auto}
 DISTILL_TEMPERATURE=${DISTILL_TEMPERATURE:-1.0}
 DISTILL_FEATURE_WEIGHT=${DISTILL_FEATURE_WEIGHT:-1.0}
 DISTILL_LOGIT_WEIGHT=${DISTILL_LOGIT_WEIGHT:-1.0}
-IMPORTANCE_HEAD_TYPE=${IMPORTANCE_HEAD_TYPE:-pp_lite}
-IMPORTANCE_HIDDEN_CHANNELS=${IMPORTANCE_HIDDEN_CHANNELS:-64}
 
 if [[ ! -f "${TEACHER_PROXY_CKPT}" ]]; then
   echo "Warning: teacher checkpoint not found at ${TEACHER_PROXY_CKPT}"
 fi
 
-# Get current configuration
-L_DISTILL=${LAMBDA_DISTILLS[$SLURM_ARRAY_TASK_ID]}
-
-# Write model-centric logs alongside Slurm default logs.
 DATE_TAG=$(date +%y%m%d)
 JOB_TAG="${SLURM_JOB_ID:-local}"
-LOG_PREFIX="${DATE_TAG}_${BACKBONE}_ld${L_DISTILL}_j${JOB_TAG}_r${SLURM_ARRAY_TASK_ID}"
+LOG_PREFIX="${DATE_TAG}_${BACKBONE}_stage3_head${HEAD_TYPE}_j${JOB_TAG}_r${SLURM_ARRAY_TASK_ID}"
 exec > >(tee -a "logs/${LOG_PREFIX}.out")
 exec 2> >(tee -a "logs/${LOG_PREFIX}.err" >&2)
 
-# Experiment Run ID
 RUN_ID="j${JOB_TAG}_r${SLURM_ARRAY_TASK_ID}"
-MODE_TAG="distill"
+MODE_TAG="stage3_head${HEAD_TYPE}"
 SAVE_DIR="data/results/experiments/${DATE_TAG}_${BACKBONE}_${MODE_TAG}_lr${LR}_bs${BATCH_SIZE}_${RUN_ID}"
 
 echo "============================================================"
 echo "[Experiment Metadata]"
-echo "stage: 2"
-echo "training_mode: distillation (teacher enabled)"
+echo "stage: 3"
+echo "training_mode: stage3 multiscale head ablation (teacher enabled)"
 echo "backbone: ${BACKBONE}"
 echo "teacher_backend: ${TEACHER_BACKEND}"
 echo "teacher_proxy_ckpt: ${TEACHER_PROXY_CKPT}"
@@ -114,7 +118,7 @@ echo "distill_logit_loss: ${DISTILL_LOGIT_LOSS}"
 echo "distill_temperature: ${DISTILL_TEMPERATURE}"
 echo "distill_feature_weight: ${DISTILL_FEATURE_WEIGHT}"
 echo "distill_logit_weight: ${DISTILL_LOGIT_WEIGHT}"
-echo "importance_head_type: ${IMPORTANCE_HEAD_TYPE}"
+echo "importance_head_type: ${HEAD_TYPE}"
 echo "importance_hidden_channels: ${IMPORTANCE_HIDDEN_CHANNELS}"
 echo "loss_weights: recon=${L_RECON}, rate=${L_RATE}, distill=${L_DISTILL}, importance=${L_IMPORTANCE}, imp_separation=${L_IMP_SEPARATION}"
 echo "slurm_job_id: ${SLURM_JOB_ID:-n/a}"
@@ -123,9 +127,6 @@ echo "python_env: ${PYTHON_ENV_DESC}"
 echo "started_at: $(date '+%Y-%m-%d %H:%M:%S %Z')"
 echo "============================================================"
 
-# Run Training
-# Uses configured backbone (default: darknet)
-# Teacher Enabled (default)
 "${PYTHON_RUNNER[@]}" src/main_train.py \
     --data_root "data/dataset/semantickitti/dataset/sequences" \
     --backbone "$BACKBONE" \
@@ -159,7 +160,7 @@ echo "============================================================"
     --distill_temperature "$DISTILL_TEMPERATURE" \
     --distill_feature_weight "$DISTILL_FEATURE_WEIGHT" \
     --distill_logit_weight "$DISTILL_LOGIT_WEIGHT" \
-    --importance_head_type "$IMPORTANCE_HEAD_TYPE" \
+    --importance_head_type "$HEAD_TYPE" \
     --importance_hidden_channels "$IMPORTANCE_HIDDEN_CHANNELS"
 
-echo "Done Experiment $SLURM_ARRAY_TASK_ID"
+echo "Done Stage3 task ${SLURM_ARRAY_TASK_ID} (${HEAD_TYPE})"

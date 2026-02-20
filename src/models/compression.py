@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from models.registry import BACKBONES, MODELS
 from models.quantization import AdaptiveQuantizer
-from models.autoencoder import Decoder, _norm, _activation, Encoder
+from models.autoencoder import Decoder, _norm, _activation, Encoder, QuantizationLayer
 from models.importance_head import ImportanceHead
 
 # Register ResNet Encoder (temporarily until migrated)
@@ -42,30 +42,67 @@ class LidarCompressionModel(nn.Module):
             self.feature_projection = nn.Identity()
 
         # 3. Build Quantizer
-        self.quantizer = AdaptiveQuantizer(**quantizer_config)
+        self.quantizer_mode = str(quantizer_config.get("mode", "adaptive")).lower()
+        if self.quantizer_mode == "adaptive":
+            self.quantizer = AdaptiveQuantizer(
+                roi_levels=quantizer_config.get("roi_levels", 256),
+                bg_levels=quantizer_config.get("bg_levels", 16),
+                eps=quantizer_config.get("eps", 1e-6),
+                use_ste=quantizer_config.get("use_ste", False),
+            )
+        elif self.quantizer_mode == "uniform":
+            bits = int(quantizer_config.get("uniform_bits", quantizer_config.get("quant_bits", 8)))
+            self.quantizer = QuantizationLayer(
+                bits=bits,
+                eps=quantizer_config.get("eps", 1e-6),
+                use_ste=quantizer_config.get("use_ste", False),
+            )
+        else:
+            raise ValueError(
+                f"Unsupported quantizer mode '{self.quantizer_mode}'. "
+                "Use one of: adaptive, uniform"
+            )
         
         # 4. Importance Head
         self.importance_head = None
-        if head_config is not None:
-            # Head takes latent features or projected features?
-            # Usually projected features (latent_channels)
-            self.importance_head = ImportanceHead(in_channels=latent_channels, **head_config)
+        if head_config is not None and self.quantizer_mode == "adaptive":
+            head_cfg = dict(head_config)
+            if "multiscale_in_channels" not in head_cfg:
+                stage_channels = getattr(self.backbone, "stage_channels", None)
+                if stage_channels is not None:
+                    head_cfg["multiscale_in_channels"] = list(stage_channels)
+            # Head takes latent features, and can optionally consume multi-stage taps.
+            self.importance_head = ImportanceHead(in_channels=latent_channels, **head_cfg)
         
         # 5. Build Decoder
         self.decoder = Decoder(**decoder_config)
         
     def forward(self, x, noise_std=0.0, quantize=None, **kwargs):
         # x: [B, 5, H, W]
-        features = self.backbone(x)
+        stage_features = None
+        if self.importance_head is not None and getattr(self.importance_head, "requires_multiscale", False):
+            try:
+                backbone_out = self.backbone(x, return_features=True)
+            except TypeError:
+                backbone_out = self.backbone(x)
+            if isinstance(backbone_out, tuple):
+                features, stage_features = backbone_out
+            else:
+                features = backbone_out
+        else:
+            features = self.backbone(x)
         latent = self.feature_projection(features)
         
-        aux = {}
+        aux = {
+            "latent": latent,
+            "quantizer_mode": self.quantizer_mode,
+        }
         importance_map = kwargs.get("importance_map", None)
         
         # If we have a head, predict importance
         if self.importance_head is not None:
             # We predict from latent
-            pred_imp, pred_logits = self.importance_head(latent)
+            pred_imp, pred_logits = self.importance_head(latent, multiscale_features=stage_features)
             aux["importance_logits"] = pred_logits
             aux["importance_map_pred"] = pred_imp
             
@@ -84,19 +121,18 @@ class LidarCompressionModel(nn.Module):
             quantize = not self.training
 
         if quantize:
-             # AdaptiveQuantizer requires importance_map
-             if isinstance(self.quantizer, AdaptiveQuantizer):
+             if self.quantizer_mode == "adaptive":
+                 # AdaptiveQuantizer requires importance_map
                  if importance_map is None:
-                     # Fallback if no head and no external map: Uniform/BG?
-                     # Or raise error (as it did). 
-                     # For verify, let's create ones.
+                     # Fallback if no head and no external map.
                      importance_map = torch.ones((latent.shape[0], 1, latent.shape[2], latent.shape[3]), device=latent.device)
                  
                  latent_deq, codes, level_map = self.quantizer(latent_noisy, importance_map)
                  aux["codes"] = codes
                  aux["level_map"] = level_map
+                 aux["importance_map_used"] = importance_map
              else:
-                 # Standard layer
+                 # Uniform per-sample quantization.
                  latent_deq, q = self.quantizer(latent_noisy)
                  aux["codes"] = q
         else:

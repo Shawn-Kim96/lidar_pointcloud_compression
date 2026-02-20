@@ -87,6 +87,7 @@ class DarkNetEncoder(nn.Module):
         )
 
         self.stages = nn.ModuleList()
+        self.stage_channels = []
         current_channels = base_channels
 
         for i, num_blocks in enumerate(layers):
@@ -106,15 +107,18 @@ class DarkNetEncoder(nn.Module):
             
             self.stages.append(nn.Sequential(*stage))
             current_channels = next_channels
+            self.stage_channels.append(current_channels)
 
         self.out_channels = current_channels
 
-    def forward(self, x):
+    def forward(self, x, return_features: bool = False):
         x = self.conv1(x)
         features = []
         for stage in self.stages:
             x = stage(x)
             features.append(x)
+        if return_features:
+            return x, features
         return x
 
 if __name__ == "__main__":

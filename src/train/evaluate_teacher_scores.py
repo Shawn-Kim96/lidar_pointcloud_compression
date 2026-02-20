@@ -35,7 +35,7 @@ def parse_args():
     parser.add_argument("--bg_levels", type=int, default=16)
     parser.add_argument("--no_labels", action="store_true", help="Run without loading ROI labels.")
 
-    parser.add_argument("--teacher_backend", choices=["auto", "proxy", "openpcdet"], default="auto")
+    parser.add_argument("--teacher_backend", choices=["auto", "proxy", "pointpillars_zhulf", "openpcdet"], default="auto")
     parser.add_argument(
         "--teacher_ckpt",
         default=str(repo_root / "data" / "results" / "checkpoints" / "stage2_adaptive.pth"),

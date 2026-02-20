@@ -51,6 +51,36 @@ def weighted_kl(
     return (kl * w).sum() / w.sum().clamp(min=1.0)
 
 
+def weighted_bce_with_logits(
+    student_logits: torch.Tensor,
+    teacher_logits: torch.Tensor,
+    *,
+    temperature: float = 1.0,
+    weight: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    student_logits = _ensure_4d(student_logits)
+    teacher_logits = _resize_like(teacher_logits, student_logits)
+    t = float(max(temperature, 1e-6))
+
+    teacher_prob = torch.sigmoid(teacher_logits / t)
+    bce = F.binary_cross_entropy_with_logits(student_logits / t, teacher_prob, reduction="none") * (t * t)
+    if weight is None:
+        return bce.mean()
+    w = _resize_like(weight, student_logits).clamp(min=0.0)
+    return (bce * w).sum() / w.sum().clamp(min=1.0)
+
+
+def weighted_logit_mse(
+    student_logits: torch.Tensor,
+    teacher_logits: torch.Tensor,
+    *,
+    weight: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    student_logits = _ensure_4d(student_logits)
+    teacher_logits = _resize_like(teacher_logits, student_logits)
+    return weighted_mse(student_logits, teacher_logits, weight=weight)
+
+
 class DistillLoss(nn.Module):
     """
     Composite distillation objective over teacher/student feature/logit maps.
@@ -62,14 +92,18 @@ class DistillLoss(nn.Module):
         logit_weight: float = 1.0,
         temperature: float = 1.0,
         loss_type: str = "mse",
+        logit_loss_type: str = "auto",
     ):
         super(DistillLoss, self).__init__()
         self.feature_weight = float(feature_weight)
         self.logit_weight = float(logit_weight)
         self.temperature = float(temperature)
         self.loss_type = str(loss_type).lower()
+        self.logit_loss_type = str(logit_loss_type).lower()
         if self.loss_type not in ("mse", "l1"):
             raise ValueError("loss_type must be one of: mse, l1")
+        if self.logit_loss_type not in ("auto", "kl", "bce", "mse"):
+            raise ValueError("logit_loss_type must be one of: auto, kl, bce, mse")
 
     def _feature_loss(
         self,
@@ -117,12 +151,34 @@ class DistillLoss(nn.Module):
             details["feature_distill"] = float(f_loss.detach().item())
 
         if student_logits is not None and teacher_logits is not None and self.logit_weight > 0.0:
-            l_loss = weighted_kl(
-                student_logits=student_logits,
-                teacher_logits=teacher_logits,
-                temperature=self.temperature,
-                weight=importance_map,
-            )
+            student_logits = _ensure_4d(student_logits)
+            teacher_logits = _resize_like(teacher_logits, student_logits)
+
+            logit_loss_type = self.logit_loss_type
+            if logit_loss_type == "auto":
+                # For one-channel logits, KL over channel dim is degenerate; use BCE distillation.
+                logit_loss_type = "bce" if student_logits.shape[1] == 1 else "kl"
+
+            if logit_loss_type == "kl":
+                l_loss = weighted_kl(
+                    student_logits=student_logits,
+                    teacher_logits=teacher_logits,
+                    temperature=self.temperature,
+                    weight=importance_map,
+                )
+            elif logit_loss_type == "bce":
+                l_loss = weighted_bce_with_logits(
+                    student_logits=student_logits,
+                    teacher_logits=teacher_logits,
+                    temperature=self.temperature,
+                    weight=importance_map,
+                )
+            else:
+                l_loss = weighted_logit_mse(
+                    student_logits=student_logits,
+                    teacher_logits=teacher_logits,
+                    weight=importance_map,
+                )
             total = total + (self.logit_weight * l_loss)
             details["logit_distill"] = float(l_loss.detach().item())
 
