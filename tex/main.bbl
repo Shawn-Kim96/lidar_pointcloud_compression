@@ -1,0 +1,91 @@
+\begin{thebibliography}{10}
+
+\bibitem{wang2022rangeentropy}
+S.~Wang and M.~Liu, ``Point cloud compression with range image-based entropy model for autonomous driving,'' in {\em European Conference on Computer Vision Workshops}, 2022.
+
+\bibitem{fan2024umotion}
+T.~Fan, Y.~Hu, R.~Gong, and Y.~Wang, ``U-motion: Learned point cloud video compression with u-structured temporal context generation,'' {\em arXiv preprint arXiv:2411.14501}, 2024.
+
+\bibitem{wang_compression_2025}
+M.~Wang, R.~Huang, W.~Xie, Z.~Ma, and S.~Ma, ``Compression {Approaches} for {LiDAR} {Point} {Clouds} and {Beyond}: {A} {Survey},'' {\em ACM Transactions on Multimedia Computing, Communications, and Applications}, vol.~21, pp.~1--31, July 2025.
+
+\bibitem{xiong_learning_2023}
+Y.~Xiong, W.-C. Ma, J.~Wang, and R.~Urtasun, ``Learning {Compact} {Representations} for {LiDAR} {Completion} and {Generation},'' in {\em 2023 {IEEE}/{CVF} {Conference} on {Computer} {Vision} and {Pattern} {Recognition} ({CVPR})}, (Vancouver, BC, Canada), pp.~1074--1083, IEEE, June 2023.
+
+\bibitem{xie2024roipcgc}
+L.~Xie, W.~Gao, H.~Zheng, and G.~Li, ``{ROI}-guided point cloud geometry compression towards human and machine vision,'' in {\em Proceedings of the 32nd {ACM} International Conference on Multimedia}, MM '24, 2024.
+
+\bibitem{abbasi2023lidar}
+R.~Abbasi, A.~K. Bashir, H.~J. Alyamani, F.~Amin, J.~Doh, and J.~Chen, ``{LiDAR} point cloud compression, processing and learning for autonomous driving,'' {\em {IEEE} Transactions on Intelligent Transportation Systems}, vol.~24, no.~1, pp.~962--972, 2023.
+
+\bibitem{wang2025compression}
+M.~Wang, R.~Huang, W.~Xie, Z.~Ma, and S.~Ma, ``Compression approaches for {LiDAR} point clouds and beyond: A survey,'' {\em {ACM} Transactions on Multimedia Computing, Communications, and Applications}, vol.~21, Jul 2025.
+
+\bibitem{martins2024impact}
+N.~A.~B. Martins, L.~A. da~Silva~Cruz, and F.~Lopes, ``Impact of {LiDAR} point cloud compression on 3d object detection evaluated on the {KITTI} dataset,'' {\em {EURASIP} Journal on Image and Video Processing}, vol.~2024, no.~15, 2024.
+
+\bibitem{isenburg2013laszip}
+M.~Isenburg, ``{LASzip}: Lossless compression of {LiDAR} data,'' in {\em Proceedings of the {ASPRS} Annual Conference}, (Baltimore, MD, USA), 2013.
+
+\bibitem{liu2024octreedepth}
+L.~Liu, Z.~Hu, and Z.~Chen, ``Towards point cloud compression for machine perception: A simple and strong baseline by learning the octree depth level predictor,'' {\em arXiv preprint arXiv:2406.00791}, 2024.
+
+\bibitem{sun2025lpcm}
+C.~Sun, H.~Yuan, S.~Jiang, D.~Ai, W.~Zhang, and R.~Hamzaoui, ``Lpcm: Learning-based predictive coding for {LiDAR} point cloud compression,'' {\em arXiv preprint arXiv:2505.20059}, 2025.
+
+\bibitem{zheng2024viewpcgc}
+H.~Zheng, W.~Gao, Z.~Yu, T.~Zhao, and G.~Li, ``{ViewPCGC}: View-guided learned point cloud geometry compression,'' in {\em Proceedings of the 32nd {ACM} International Conference on Multimedia}, MM '24, 2024.
+
+\bibitem{akhtar2024interframe}
+A.~Akhtar, Z.~Li, and G.~V. der Auwera, ``Inter-frame compression for dynamic point cloud geometry coding,'' {\em {IEEE} Transactions on Image Processing}, vol.~33, pp.~584--593, 2024.
+
+\bibitem{li2023mseg3d}
+J.~Li, H.~Dai, H.~Han, and Y.~Ding, ``{MSeg3D}: Multi-modal 3d semantic segmentation for autonomous driving,'' in {\em Proceedings of the {IEEE/CVF} Conference on Computer Vision and Pattern Recognition}, 2023.
+
+\bibitem{sun2023salpcc}
+X.~Sun, M.~Wang, J.~Du, Y.~Sun, S.~S. Cheng, and W.~Xie, ``A task-driven scene-aware {LiDAR} point cloud coding framework for autonomous vehicles,'' {\em {IEEE} Transactions on Industrial Informatics}, vol.~19, no.~8, pp.~8731--8740, 2023.
+
+\bibitem{chang2021mapcompress}
+M.-F. Chang, W.~Dong, J.~Mangelson, M.~Kaess, and S.~Lucey, ``Map compressibility assessment for {LiDAR} registration,'' in {\em Proceedings of the {IEEE/RSJ} International Conference on Intelligent Robots and Systems}, IROS 2021, 2021.
+
+\bibitem{contreras2017opoco}
+L.~Contreras and W.~Mayol-Cuevas, ``{O-POCO}: Online point cloud compression mapping for visual odometry and {SLAM},'' in {\em Proceedings of the {IEEE} International Conference on Robotics and Automation}, ICRA 2017, 2017.
+
+\bibitem{tu2019pointcloud}
+C.~Tu, E.~Takeuchi, A.~Carballo, and K.~Takeda, ``Point cloud compression for 3d {LiDAR} sensor using recurrent neural network with residual blocks,'' in {\em Proceedings of the {IEEE} International Conference on Robotics and Automation}, ICRA 2019, pp.~3274--3279, 2019.
+
+\bibitem{feng2020realtime}
+Y.~Feng, S.~Liu, and Y.~Zhu, ``Real-time spatio-temporal {LiDAR} point cloud compression,'' in {\em Proceedings of the {IEEE/RSJ} International Conference on Intelligent Robots and Systems}, IROS 2020, 2020.
+
+\bibitem{cao2025rcpcc}
+Y.~Cao, Y.~Wang, and H.~Chen, ``Real-time {LiDAR} point cloud compression and transmission for resource-constrained robots,'' {\em arXiv preprint arXiv:2502.06123}, 2025.
+
+\bibitem{xu2018largescale}
+Z.~Xu, Z.~Li, Q.~Guan, D.~Zhang, Q.~Li, J.~Nan, C.~Liu, W.~Bian, and J.~Ye, ``Large-scale order dispatch in on-demand ride-hailing platforms: A learning and planning approach,'' in {\em Proceedings of the 24th {ACM} {SIGKDD} International Conference on Knowledge Discovery \& Data Mining}, KDD '18, 2018.
+
+\bibitem{kim2024learning}
+Y.~Kim, V.~Jayawardana, and S.~Samaranayake, ``Learning-augmented vehicle dispatching with slack times for high-capacity ride-pooling.'' SSRN preprint 4801437, Apr 2024.
+\newblock Available at \url{https://ssrn.com/abstract=4801437}.
+
+\bibitem{anastasiu-dsaa2016}
+D.~C. Anastasiu and G.~Karypis, ``Efficient identification of tanimoto nearest neighbors,'' in {\em 2016 IEEE International Conference on Data Science and Advanced Analytics (DSAA)}, DSAA '16, pp.~156--165, 2016.
+
+\bibitem{anastasiu-idsc2017}
+D.~C. Anastasiu, ``Cosine approximate nearest neighbors,'' in {\em Data Science -- Analytics and Applications}, iDSC 2017, (Wiesbaden), pp.~45--50, Springer Fachmedien Wiesbaden, 2017.
+
+\bibitem{kapoor-fie2018}
+M.~Kapoor, S.~Hua, and D.~C. Anastasiu, ``Improving student motivation through competitive active learning,'' in {\em 2018 IEEE Frontiers in Education Conference}, FIE 2018, IEEE, October 2018.
+
+\bibitem{anastasiu-icde2014}
+D.~C. Anastasiu and G.~Karypis, ``L2ap: Fast cosine similarity search with prefix l-2 norm bounds,'' in {\em The 30th IEEE International Conference on Data Engineering}, ICDE 2014, pp.~784--795, 2014.
+
+\bibitem{anastasiu2015}
+D.~C. Anastasiu, A.~M. Rashid, A.~Tagarelli, and G.~Karypis, ``Understanding computer usage evolution,'' in {\em 31st IEEE International Conference on Data Engineering}, ICDE 2015, pp.~1549--1560, 2015.
+
+\bibitem{anastasiu-sc2015}
+D.~C. Anastasiu and G.~Karypis, ``Pl2ap: Fast parallel cosine similarity search,'' in {\em Proceedings of the 5th Workshop on Irregular Applications: Architectures and Algorithms, in conjunction with SC'15}, IA3 2015, (New York, NY, USA), pp.~1--8, ACM, 2015.
+
+\bibitem{anastasiu-sc2016}
+D.~C. Anastasiu and G.~Karypis, ``Fast parallel cosine k-nearest neighbor graph construction,'' in {\em 2016 6th Workshop on Irregular Applications: Architecture and Algorithms (IA3)}, pp.~50--53, Nov 2016.
+
+\end{thebibliography}

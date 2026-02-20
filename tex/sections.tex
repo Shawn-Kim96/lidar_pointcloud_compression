@@ -1,0 +1,264 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Introduction}\label{sec:introduction}
+Autonomous driving stacks rely on LiDAR to capture metrically accurate 3D geometry regardless of illumination or weather. 
+Successive sensor generations increase channel counts and angular resolution, producing tens of millions of points per second that quickly saturate on-board compute, storage, and wireless uplinks. 
+Sustaining fleet-scale perception therefore demands LiDAR representations that aggressively compress data yet preserve the structure required for downstream reasoning.
+
+Range-image projection offers the most accessible entry point because it converts irregular point clouds into dense $H \times W \times C$ tensors that conventional convolutional autoencoders can process. 
+Learned codecs such as RICNet incorporate entropy models and spatial priors tailored to projected sweeps, while octree and predictive schemes extend rate--distortion trade-offs within a single frame~\cite{wang2022rangeentropy}. 
+Temporal models like U-Motion demonstrate that inter-frame residual coding can further reduce bitrate~\cite{fan2024umotion}, but they seldom connect compression with the representation-learning objectives needed to reconstruct masked or missing regions. 
+Recent surveys underscore the absence of a LiDAR-only roadmap that spans from intuitive baselines to generative completion while remaining faithful to real-time constraints~\cite{wang_compression_2025}.
+
+This thesis answers that need through a staged LiDAR-only research agenda that increases modeling difficulty in controlled increments. 
+\textbf{Stage~1} converts each sweep into a 2D range image and trains a residual CNN autoencoder with quantization-aware latent bottlenecks, following RICNet-style practices that provide a reproducible baseline~\cite{wang2022rangeentropy}. 
+\textbf{Stage~2} injects spatio-temporal reasoning by conditioning the encoder on a motion-compensated reconstruction of the previous frame and coding only the residual novelty inspired by U-Motion~\cite{fan2024umotion}. 
+\textbf{Stage~3} recasts compression as representation learning: aggressive masking and down-sampling force the network to infer dense geometry from sparse evidence by relying on discrete codebooks in the spirit of UltraLiDAR and LiDAR completion~\cite{xiong_learning_2023}. 
+An optional \textbf{Stage~4} steers entropy coding toward task-critical regions (e.g., vehicles or pedestrians) so that machine-vision accuracy is preserved even at low bitrates~\cite{xie2024roipcgc}.
+
+By foregrounding representation learning and reconstruction quality at every layer, the roadmap provides (i) a transparent LiDAR-only baseline, (ii) a temporal compression module that bridges motion dynamics with rate--distortion objectives, (iii) a generative completion head aligned with reconstruction fidelity, and (iv) an evaluation strategy that links bandwidth savings to downstream perception. 
+Each successive chapter builds on the previous one, ensuring that the final system meets real-time deployment constraints while advancing the thesis goals of representation learning and reconstruction-centric LiDAR compression.
+
+The thesis therefore contributes (1) a cleanly reproducible range-image codec that serves as a reference point for future LiDAR compression work, (2) a spatio-temporal residual module that converts the baseline into a predictive coder capable of exploiting motion cues, (3) a masking-driven completion strategy that brings representation learning objectives directly into the codec, and (4) a task-aware bitrate controller that preserves perception-critical regions under tight bandwidth budgets. Together these elements translate the staged roadmap into a concrete system design that can be implemented, analyzed, and iterated upon throughout the remainder of this document.
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Literature Review}\label{sec:literature_review}
+
+Autonomous mobility platforms increasingly depend on dense 3D sensing, yet the raw bandwidth and storage demands of LiDAR streams quickly overwhelm on-board compute and communication channels. This section situates the proposed research within four complementary threads: (i) surveys that map the evolving design space of LiDAR compression and its evaluation protocols, (ii) learned codecs that push rate--distortion and task-awareness, (iii) pipelines that align compression with scene semantics and localization objectives, and (iv) systems research that couples perception bandwidth with mobility operations. These threads collectively frame the staged LiDAR-only roadmap introduced in \autoref{sec:introduction}.
+
+\subsection{Surveys and Evaluation Frameworks}
+
+Recent syntheses provide a structured view of how LiDAR compression has matured from handcrafted quantization rules into hybrid learned systems. Abbasi et~al.\ chart the progression from classical octree pruning to neural entropy models while emphasizing that compression choices impact perception tasks in subtle ways~\cite{abbasi2023lidar}. Wang et~al.\ extend that perspective by underscoring how emerging datasets, evaluation metrics, and multimodal sensor suites reshape codec requirements~\cite{wang2025compression}. Complementing these qualitative taxonomies, Martins et~al.\ deliver quantitative evidence that both MPEG baselines and recent neural codecs can severely degrade object detection unless detector training pipelines are adapted, particularly once bitrates dip below six bits per point~\cite{martins2024impact}. Together, these surveys highlight two persistent challenges: jointly optimizing compression with downstream analytics, and developing benchmarks that measure more than geometric fidelity.
+
+\subsection{Learned Point Cloud Compression}
+
+Classical lossless codecs, most notably LASzip, still underpin many production LiDAR workflows because they preserve the exact LAS record layout while shrinking storage footprints by an order of magnitude~\cite{isenburg2013laszip}. Against that backdrop, learning-based codecs have become the focal point for reducing bitrate without sacrificing machine perception. Range image entropy models such as RICNet~\cite{wang2022rangeentropy} and adaptive octree depth predictors~\cite{liu2024octreedepth} tailor spatial priors to sparsely sampled LiDAR scans, achieving lower entropy than handcrafted predictors. Temporal models deepen these gains: U-Motion~\cite{fan2024umotion} fuses coarse-to-fine motion propagation within a U-shaped architecture to stabilize point cloud video coding, while LPCM~\cite{sun2025lpcm} frames LiDAR compression as predictive coding in latent space, sharing parameters across multiple quantization stages. Cross-modal conditioning further enriches the latent representations—ViewPCGC~\cite{zheng2024viewpcgc} injects perspective imagery to guide contour preservation, and ROI-guided compression allocates additional bits to semantically critical regions so that both human operators and downstream networks maintain accuracy~\cite{xie2024roipcgc}. Inter-frame feature warping in TIP’s geometry coder~\cite{akhtar2024interframe} and multi-modal backbones such as MSeg3D~\cite{li2023mseg3d} confirm that motion cues and sensor fusion must be embedded directly into the codec to fully exploit redundancies.
+
+\subsection{Task-Driven and Scene-Aware Pipelines}
+
+Although generic learned codecs yield impressive rate--distortion curves, several works demonstrate that aligning compression with task objectives can deliver larger practical benefits. Sun et~al.\ incorporate semantic segmentation to steer bitrate toward dynamic, safety-critical agents, showing improved downstream perception under the same bitrate budget~\cite{sun2023salpcc}. Martins et~al.\ further reveal that retraining detectors on reconstructed point clouds recovers accuracy lost to quantization, effectively advocating for codebooks that are co-designed with the perception stack~\cite{martins2024impact}. Beyond perception, map-focused studies evaluate how alternative scene representations affect localization. Chang et~al.\ show that carefully chosen compressive map formats can strike favorable trade-offs between storage and registration robustness, enabling lighter-weight maps without sacrificing re-localization accuracy~\cite{chang2021mapcompress}. Collectively, these studies motivate codecs that expose explicit controls for allocating bits to semantic classes, structural priors, or map features depending on the intended downstream application.
+
+\subsection{Real-Time Robotics and Mapping Considerations}
+
+From a systems viewpoint, the feasibility of any codec hinges on latency, compute footprint, and integration with online SLAM. The O-POCO pipeline exemplifies early efforts to compress feature maps on-the-fly, prioritizing relocalization accuracy while thinning redundant 3D points in visual odometry loops~\cite{contreras2017opoco}. Tu et~al.\ investigate recurrent neural networks that directly operate on raw LiDAR packets, reporting negligible SLAM degradation even as storage costs drop substantially~\cite{tu2019pointcloud}. Recent frameworks push further toward deployment by integrating adaptive bitrate control and cloud-assisted processing. Feng et~al.\ demonstrate real-time spatio-temporal compression that maintains over-10~Hz throughput, whereas Cao et~al.\ add QoE-based bitrate modulation to remain resilient under fluctuating wireless bandwidth, ensuring perception tasks continue to receive timely updates~\cite{feng2020realtime,cao2025rcpcc}. These systems collectively argue that codec design must balance predictive accuracy with computational and networking constraints inherent to field robots.
+
+\subsection{Operational Integration in Mobility Services}
+
+Efficient LiDAR compression also influences upstream decision-making infrastructure in mobility services where sensing, forecasting, and control pipelines are tightly coupled. Large-scale order dispatch algorithms, such as the KDD’18 framework deployed at Didi Chuxing, rely on timely state estimates to plan resource allocation across cities~\cite{xu2018largescale}. More recent learning-augmented optimization incorporates probabilistic acceptance models and reinforcement learning to personalize slack times in high-capacity ride pooling, again assuming reliable sensory inputs~\cite{kim2024learning}. Compression frameworks that can stream rich 3D context without saturating vehicular networks therefore become enablers for these analytics pipelines. High-fidelity yet bandwidth-aware LiDAR data feeds improve situational awareness for fleet control, which closes the loop between perception research and operational logistics~\cite{cao2025rcpcc}.
+
+Taken together, the literature underscores a clear direction: future LiDAR compression must be adaptable to application semantics, optimized jointly with machine perception models, and cognizant of the communication and decision-making infrastructure it supports. The techniques surveyed here motivate the architectural choices and evaluation criteria adopted in the remainder of this thesis.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Proposed Method}\label{sec:proposed_method}
+
+\figurename~\ref{fig:proposed-arch} summarizes the LiDAR-only compression pipeline developed in this work. 
+Each input sweep is first projected into a cylindrical range image, optionally masked to simulate sparse sampling, and then passed through a temporal fusion module that aligns previously reconstructed frames before encoding. 
+Latent features are quantized, entropy coded into a compact bitstream, and later decoded to reconstruct the dense range image and corresponding point cloud. 
+Losses defined on both the 2D range grid and reconstructed 3D geometry supervise the entire pipeline so that compression factors can be tuned without sacrificing reconstruction fidelity or downstream perception accuracy.
+
+\subsection{Stage 1: Range-Image Autoencoder}
+Stage~1 focuses on building a reproducible baseline inspired by RICNet~\cite{wang2022rangeentropy}. 
+Input point clouds are converted into $H \times W \times C$ range images storing range, reflectivity, and auxiliary channels. 
+A lightweight 2D convolutional encoder with residual blocks downsamples the tensor into a compact latent grid. 
+Uniform or vector-quantized bottlenecks convert latent activations into discrete symbols that are entropy coded into a bitstream for transmission or storage. 
+Decoding mirrors this path via transpose convolutions, producing a reconstructed range image that is back-projected into a point cloud and supervised with range-domain $\ell_1$ loss plus Chamfer Distance.
+
+\subsection{Stage 2: Spatio-Temporal Residual Coding}
+Stage~2 extends the baseline by ingesting the previously decoded frame $\hat{R}_{t-1}$, estimating a 2D motion field between $\hat{R}_{t-1}$ and the current projection, and warping features so that only residual innovation is compressed, echoing U-Motion's coarse-to-fine strategy~\cite{fan2024umotion}. 
+The temporal fusion module shares weights with the encoder so that recurrent state grows implicitly within the latent grid. 
+Training alternates between key-frame encodings that refresh the context and residual frames that rely heavily on the warped features, yielding bitrate reductions without degrading reconstruction quality.
+
+\subsection{Stage 3: Masked Representation Learning and Completion}
+Stage~3 reframes compression as representation learning by aggressively masking beams, pixels, or entire regions prior to encoding. 
+The decoder is upgraded into a generative head (e.g., a VQ-VAE or diffusion-inspired module) that learns discrete codebooks tailored to LiDAR structure, enabling it to hallucinate dense geometry conditioned on sparse evidence, similar to UltraLiDAR-style completion~\cite{xiong_learning_2023}. 
+Perceptual losses computed on range images, Chamfer Distance in 3D, and temporal smoothness regularizers on the latent code encourage faithful reconstruction even when more than half of the input is missing.
+
+\subsection{Stage 4: Task-Aware Bit Allocation}
+The final, optional stage injects perception awareness into the entropy model by reweighting latent channels associated with regions of interest (ROI) such as vehicles or pedestrians, akin to ROI-guided codecs~\cite{xie2024roipcgc}. 
+Detection or segmentation losses back-propagate through the decoder so that the codec learns to preserve details that matter for downstream autonomy tasks while allowing benign regions to receive fewer bits. 
+The same feedback channels can inform adaptive bitrate control during deployment, ensuring that limited bandwidth is devoted to safety-critical content.
+
+
+\begin{figure}[!htb]
+  \centering
+  \includegraphics[width=0.9\textwidth]{figures/system_architecture.png}
+  \caption{Simplified LiDAR-only compression pipeline showing the range-image encoder (Stage~1), temporal residual context (Stage~2), masked completion decoder (Stage~3), and optional task-aware bitrate control (Stage~4).}
+  \label{fig:proposed-arch}
+\end{figure}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Sections and Headings}\label{sec:sections}
+A thesis is generally broken down into sections, each section encompassing a different area of the work. For example, the first section in a thesis is generally an ``Introduction'', which lays out what the research is about. The top-level sections in the thesis are called chapters and always start at the top of a page. When referring to a top-level section, one should mention it as Chapter~\ref{sec:introduction}, where the number is the section/chapter number. The numbers, as with all references in the thesis, should never be written out. Rather, use LaTeX reference macros, which will be automatically replaced with appropriate numbers when compiling the thesis document. Chapter~\ref{sec:latex}, as well as the source code of this document, has many examples of references.
+
+A thesis section can be further broken down into subsections. One should use at most 4 section levels in a thesis. This paragraph is in the 1st section level, ``section''. We will create 3 more subsection levels. The 2nd section level is created using the ``subsection'' macro. The 3rd section level is created using the ``subsubsection'' macro. However, the 4th section level is created using the ``paragraph'' macro. Note that the IEEE paragraph style is slightly different than the section styles, as the paragraph caption will be in-line with the text of the section and will be automatically ended with a colon. Students should note that more than 3 subheadings (4 section levels) becomes confusing to the reader and should thus avoid further breakdown of paragraph sections.
+
+Note that the section header is written in title case, though it appears in the text as uppercase. Students should not deviate from using title case, as it will change the appearance of the section title in the table of contents. The section title should be written in title case.
+
+\subsection{Second Section Level}
+This is an example of the 2nd level of a section. The subsection title should be written in title case.
+
+\subsubsection{Third Section Level}
+This is an example of the 3rd level of a section. The subsubsection title should be written in title case.
+
+\paragraph{Fourth section level}
+This is an example of the 4th level of a section. Note that the paragraph title should be written in sentence case, unlike the higher level titles.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Example Sections}\label{sec:example_sections}
+
+In this chapter we discuss a possible set of chapters for a thesis. The example is somewhat specific to the author's field of research (Data Science). Students should, in general, consult with their adviser on the list of chapters that they should include in their thesis.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Mini-introduction to LaTeX}\label{sec:latex}
+
+This chapter needs to be filled out. For now, it contains some very basic examples.
+
+
+\subsection{Equations}\label{sec:latex:equations}
+
+Equations and mathematical formulas can be included in-line, within the text, for example when explaining that $\norm{\vec x}_2$ signifies the $\ell_2$ norm of a vector, as long as the included math formula or symbols are short (less than half a line). For longer formulas, or formulas that need to be referenced later in the text, one should use the \texttt{equation} macro or related macros, e.g., \texttt{align}. For example, the dot-product of two vectors, $\vec x$ and $\vec y$, is defined as
+\begin{equation}\label{eq:dot-product}
+    \langle \vec x, \vec y \rangle = \vec{x}^T\vec{y} = \sum_{j=1}^m x_j\times y_j.
+\end{equation}
+Note that equations can be assigned labels and referenced throughout the text. However, unlike figures and tables (see next sections), the equation should be defined prior to its reference. Now that we can defined the formula for the vector dot-product, we can now refer to Equation~\ref{eq:dot-product} to remind readers of its definition.
+
+\subsection{Figures}\label{sec:latex:figures}
+
+Figures should contain a caption at the bottom. The caption is a sentence or phrase that describes the content of the figure. As such, it should start with a capital letter and end with a period. The caption is not a title, so subsequent words after the first word should not be capitalized unless they are proper names. A figure should be introduced in the text prior to its inclusion in the text. When referring to the figure, make use of the  \texttt{{\textbackslash}figurename} macro, provided by the IEEE style, to ensure style compliance. Additionally, use a non-breaking space character to connect the \figurename~text with the number assigned to the figure reference. This will ensure that \figurename~and the reference will be included on the same line. For example, \figurename~\ref{fig:proj-arch} introduces our project architecture. Note that font sizes in figures and tables may be smaller than the rest of the thesis. However, they should be readable.
+
+\begin{figure}[!htb]
+  \centering
+  \includegraphics[width=0.7\textwidth]{figures/proj-arch.pdf}
+  \caption{Project architecture.}
+  \label{fig:proj-arch}
+\end{figure}
+
+
+\subsection{Tables}\label{sec:latex:tables}
+
+Tables should contain a caption at the top. Unlike figures, the caption in the table is the table title, and it should be capitalized accordingly. The table should be presented in the text prior to its inclusion in the text. Moreover, references to tables should follow the same directions as those for figures, except use the \texttt{{\textbackslash}tablename} macro. For example, \tablename~\ref{tbl:dataset} introduces statistics about the dataset used in our analysis.
+
+\begin{table}[!htb]
+\caption{Dataset Characteristics}
+\label{tbl:dataset}
+\centering
+\begin{tabular}{c|c|c|c|c|c}
+\hline
+\textbf{Name} & \textbf{Duration (h)} & \textbf{Activities} & \textbf{Subjects}  & \textbf{Sensors} & \textbf{Frequency (Hz)} \\ 
+\hline
+JSI-ADL & 18.8 & 14 & 10 & 2 & 50\\ 
+REALDISP & 9 & 33 & 17 & 2 & 50\\ 
+UCI-HAR & 1.5 & 6 & 30 & 2 & 50\\ 
+Ours & 1500 & 14 & 24 & 2 & 20\\ 
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Algorithms}\label{sec:latex:algorithms}
+
+LaTeX provides powerful macros for writing algorithms. Note that labels can be included within the algorithm, which allows the writer to refer to specific lines in the algorithm. The algorithm should be introduced first. Note that the label referring to the whole algorithm is placed right after the caption. Similar to a table, the caption is a title and should be capitalized accordingly. For example, Algorithm~\ref{alg:proj-motif} describes the process for producing a normalized 2-hop left-projection of a bipartite graph described by the vertex sets $V^1$ and $V^2$ and the edge set $E$. Long algorithms (greater than half a page) should be relegated to the Appendix.
+
+\begin{algorithm}[!htb]
+\caption{The Normalized 2-hop Left-Projection Algorithm}\label{alg:proj-motif}
+\small
+\begin{algorithmic}[1]
+\Procedure{Project}{$V^1,V^2,E$}\Comment{Construct the left projection $G^1$}
+%%
+\item[] \quad\; // Initialize and compute degree vectors.
+\For {$(v^1_i, v^2_j) \in E$} \Comment{Count neighbors}
+\State $\lambda_n(i) \gets \lambda_n(i) + 1$
+\State $\lambda_m(j) \gets \lambda_m(j) + 1$
+\EndFor
+\item[] \quad\; // SpGEMM
+%%
+\For {$v^1_i \in V^1$} \label{alg:proj-motif-spgemm1}
+\State $acc(:) \gets 0$ \Comment{Initialize output row accumulator data structure}
+\For {$v^2_k \in \Gamma(v^1_i)$}
+\State $l \gets  (1/\lambda_n(i)) \times \times w_{i,k} \times (1/\lambda_m(k))$ \label{alg:proj-motif-lk}
+\For {$v^1_j \in \Gamma(v^2_k)$}
+\If {$v^1_j \ne v^1_i$} \Comment{Avoid computing output diagonal}
+\State $acc(j) \gets acc(j) + l \times w_{j,k}$ \label{alg:proj-motif-accum}
+\EndIf
+\EndFor
+\EndFor
+\State $C(i,:) = acc(:)$
+\EndFor\label{alg:proj-motif-spgemm2}
+\item[] \quad\; // Normalize rows of $C$
+%%
+\For {$i = 1, \ldots, |V^1|$}\label{alg:proj-motif-norm1}
+\State $n_i \gets 0$
+\For {$j = 1, \ldots, |V^2| \text{ s.t. } C(i,j) > 0$}
+\State $n_i \gets n_i + \text{abs}(C(i,j))$
+\EndFor
+\For {$j = 1, \ldots, |V^2| \text{ s.t. } C(i,j) > 0$}
+\State $C(i,j) \gets C(i,j) / n_i$
+\EndFor
+\EndFor\label{alg:proj-motif-norm2}
+\State \textbf{return} $C$\Comment{Edge set weight matrix for $G^1$}
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+After introducing the algorithm, one can then refer to sections of the algorithm in the process of describing it in the text. For example, note that line~\ref{alg:proj-motif-accum} denotes the accumulation of projection weights for a vertex $v_i^1$ in $V^1$. For theses that contain many mathematical symbols, it is a good idea to provide the reader with a reference for the meaning of these symbols. This table is generally included in the preliminary chapters, after the introduction. We will include an example here. \tablename~\ref{tbl:notation-g} provides a reference for notation used throughout the paper that the algorithm above is included in.
+
+\begin{table}[!htb]
+\caption {Graph and Projection Notation} \label{tbl:notation-g}
+\centering
+\small
+ \begin{tabular}{l l}
+ \hline
+ \textbf{Symbol} & \textbf{Meaning} \\ 
+ \hline
+ $G$ & A graph topology. \\
+ $V^1$, $V^2$ & The left and right node partitions in a bipartite graph. \\
+ $E$ & The set of edges in $G$. \\
+ $|X|$ & The cardinality of set $X$. \\
+ $v^1_i \in V^1$ & A vertex in the left node partition $V^1$. \\
+ $v^2_j \in V^2$ & A vertex in the right node partition $V^2$. \\
+ $(v^1_i, v^2_j, w_{i,j})\in E$ & The edge connecting nodes $v^1_i$ and $v^2_j$ with weight $w_{i,j}$ in graph $G$. \\
+ $\Gamma(v^1_i)$ & The set of vertices in $V^2$ adjacent to $v^1_i$, i.e., its neighborhood. \\
+ $\lambda_n,\lambda_m$ & Node degree vectors for the left and right partitions.\\
+ $A \in \mathbb{R}^{n\times m}$ & The edge weight matrix for the bipartite graph $G$; $A(i,j) = w_{i,j}$. \\
+ $B$ & Weighted adjacency matrix for graph $G$.\\
+ \hline
+ $G^1 = (V^1, E^1)$ & The left projection graph.\\
+ $G^2 = (V^2, E^2)$ & The right projection graph.\\
+ $G^b = (V, E^b)$ & The biprojection graph.\\
+ $(v^1_i, v^1_j, s^1_{i,j})\in E^1$ & The edge connecting $v^1_i$ and $v^1_j$ with weight $s^1_{i,j}$ in the left projection graph. \\
+ $W^1$ & Edge weight matrix for the left projection graph; $W^1(i,j) = s^1_{i,j}$.\\
+ $W^2$ & Edge weight matrix for the right projection graph; $W^2(i,j) = s^2_{i,j}$.\\
+ $W$ & Weighted adjacency matrix for the bi-projection graph of $G$.\\
+ \hline
+ \end{tabular}
+\end{table}
+
+\subsection{Location of Floats}\label{sec:latex:floats}
+
+Floats (e.g., algorithms, tables and figures) should not follow the IEEE standard of being placed at the top or bottom of the page. As per the GUP thesis guidelines, they must appear right after their reference and not break any paragraphs, i.e., they should be placed in the text, after the paragraph in question. Use the location hint \texttt{[!htb]} to let LaTeX know the float should be placed in between paragraphs. If the float takes up an entire page and the last paragraph on the current page does not fit in its entirety, it should be moved after the float page to avoid breaking the continuity of the paragraph, leaving some blank lines at the end of the current page.
+
+Pages that contain only floats will have floats vertically centered, which will produce additional blank lines between the floats in the page or between a float and the top and bottom of the page. The thesis guidelines specifically prohibit additional white space in the thesis. This case and the one discussed in the previous paragraph are the only acceptable reasons for having extra blank lines in the text.
+
+\subsection{Citations}\label{sec:latex:citations}
+When citing papers, it is advisable to collect BibTeX records for the papers that you wish to cite, which will be automatically processed into the correct citation style by the LaTeX/BibTeX compiler. Citing a work by Anastasiu and Karypis~\cite{anastasiu-dsaa2016}, for example, is as simple as writing ``Anastasiu and Karipis\textasciitilde{\textbackslash}cite\{anastasiu-dsaa2016\},'' where \textit{anastasiu-dsaa2016} is the key associated with the paper's BibTeX record in the \textit{references.bib} file. Note the non-breaking space character (\textasciitilde) between the word before the citation and the \textit{{\textbackslash}cite} command. It gets translated into a space, and does not allow LaTeX to print the citation on a different line than the connecting word. This, of course, does not work if you put a space between the word and the non-breaking space character, e.g., ``Karypis \textasciitilde{\textbackslash}cite\{anastasiu-dsaa2016\}''.
+
+When citing papers with a single author, one should refer to the work by citing the author's last name. For example, Anastasiu~\cite{anastasiu-idsc2017} used a combination of heuristic candidate selection and search space filtering to efficiently identify approximate nearest neighbors. When the work has two authors, both authors should be referenced by their last name, as in the previous example of the work by Anastasiu and Karypis~\cite{anastasiu-dsaa2016}. Finally, if there are more than two authors, one should reference the first author's last name, followed by the phrase \textit{et al.}, which is short for the Latin \textit{et alia} and means ``and others''. Note the placement of the period. As an example, Kapoor et al.~\cite{kapoor-fie2018} discuss the benefits of competitive active learning in engineering education. Note that it is not necessary to mention authors by last name when listing multiple works as examples or evidence of a statement. For example, many recent works have developed filtering-based methods for nearest neighbor graph construction~\cite{anastasiu-icde2014, anastasiu2015, anastasiu-sc2015, anastasiu-sc2016}.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Writing Advice}\label{sec:writing}
+
+This chapter contains a list of common writing mistakes that students tend to make when writing theses. Students should read the list carefully, in addition to the examples provided by GUP in their thesis guidelines, and guard against making these mistakes in their theses.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Future Work}\label{sec:future_work}
+
+First of all, we plan to finish this template example and, once the style/template has been approved by GUP, disseminate it to others in the CoE. We plan to invite contributions from other CMPE and CoE faculty in improving this document, with the goal to include the most useful information to help students succeed in writing their thesis.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Conclusions}\label{sec:conclusions}
+This macro example thesis was written as a guide to CMPE and CoE students for writing quality theses in LaTeX. The provided template, along with this guide, should make the task of complying with GUP formatting requirements much easier for students. The CMPE LaTeX thesis template and this document are a work in progress. The reader is invited to participate in improving both via Git pull requests. The project can be found at \url{https://github.com/davidanastasiu/thesis_template-SJSU_CMPE}.
