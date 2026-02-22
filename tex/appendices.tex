@@ -8,21 +8,21 @@ This appendix lists experiment scripts and default settings used in the current 
 \small
 \begin{tabular}{l l l}
 \toprule
-\textbf{Stage} & \textbf{Script} & \textbf{Key defaults} \\
+\textbf{Family} & \textbf{Script} & \textbf{Key defaults} \\
 \midrule
-Stage0 &
+UB (internal Stage0) &
 \texttt{src/scripts/run\_uniform\_baseline.sh} &
 \texttt{quantizer\_mode=uniform}, bits sweep \{4,6,8\}, \\
 && \texttt{lambda\_recon=1.0}, others 0 \\
-Stage1 &
+ARS (internal Stage1) &
 \texttt{src/scripts/run\_stage1.sh} &
 \texttt{balanced\_v1}, \texttt{normalized\_global}, \\
 && \texttt{weighted\_bce}, \texttt{roi\_target\_mode=maxpool} \\
-Stage2 &
+ADS (internal Stage2) &
 \texttt{src/scripts/run\_stage2.sh} &
 \texttt{balanced\_v2}, \texttt{normalized\_bg}, \\
 && \texttt{lambda\_distill} sweep \{0.1,0.5,1.0\} \\
-Stage3 &
+MS-ADS (internal Stage3) &
 \texttt{src/scripts/run\_stage3\_multiscale\_heads.sh} &
 Head sweep \{\texttt{bifpn}, \texttt{deformable\_msa}, \\
 && \texttt{dynamic}, \texttt{rangeformer}, \texttt{frnet}\} \\
@@ -31,7 +31,7 @@ Head sweep \{\texttt{bifpn}, \texttt{deformable\_msa}, \\
 \end{table}
 
 \subsection{Teacher setup}
-Teacher backend for Stage2/3 is \texttt{pointpillars\_zhulf}, using checkpoint:
+Teacher backend for ADS/MS-ADS is \texttt{pointpillars\_zhulf}, using checkpoint:
 \begin{equation}
 \texttt{data/checkpoints/pointpillars\_epoch\_160.pth}.
 \end{equation}
@@ -52,7 +52,7 @@ The following files were used to build the tables and intermediate analysis in t
 \section{Planned Figures for Next Draft}\label{apx:planned-figures}
 This version intentionally omits figures. The next draft should include:
 \begin{itemize}
-    \item threshold sweep plots (precision, recall, IoU vs threshold) per Stage1/2 run,
+    \item threshold sweep plots (precision, recall, IoU vs threshold) per ARS/ADS run,
     \item bitrate-distortion plots (native vs oracle ROI and uniform matched-budget),
     \item qualitative ROI visualization panels:
     input range/intensity, ground-truth ROI mask, predicted importance map, predicted ROI binary map.
