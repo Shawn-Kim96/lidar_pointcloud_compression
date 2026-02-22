@@ -1,126 +1,79 @@
 \relax 
 \providecommand\hyper@newdestlabel[2]{}
-\citation{wang2022rangeentropy}
-\citation{fan2024umotion}
-\citation{wang_compression_2025}
-\citation{wang2022rangeentropy}
-\citation{fan2024umotion}
-\citation{xiong_learning_2023}
-\citation{xie2024roipcgc}
+\citation{*}
 \@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
 \newlabel{sec:introduction}{{1}{1}{Introduction}{section.1}{}}
-\citation{abbasi2023lidar}
-\citation{wang2025compression}
-\citation{martins2024impact}
-\citation{isenburg2013laszip}
-\citation{wang2022rangeentropy}
-\citation{liu2024octreedepth}
-\citation{fan2024umotion}
-\citation{sun2025lpcm}
-\citation{zheng2024viewpcgc}
-\citation{xie2024roipcgc}
-\citation{akhtar2024interframe}
-\citation{li2023mseg3d}
-\@writefile{toc}{\contentsline {section}{\numberline {2}Literature Review}{3}{section.2}\protected@file@percent }
-\newlabel{sec:literature_review}{{2}{3}{Literature Review}{section.2}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Surveys and Evaluation Frameworks}{3}{subsection.2.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Learned Point Cloud Compression}{3}{subsection.2.2}\protected@file@percent }
-\citation{sun2023salpcc}
-\citation{martins2024impact}
-\citation{chang2021mapcompress}
-\citation{contreras2017opoco}
-\citation{tu2019pointcloud}
-\citation{feng2020realtime,cao2025rcpcc}
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}Task-Driven and Scene-Aware Pipelines}{4}{subsection.2.3}\protected@file@percent }
-\citation{xu2018largescale}
-\citation{kim2024learning}
-\citation{cao2025rcpcc}
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.4}Real-Time Robotics and Mapping Considerations}{5}{subsection.2.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.5}Operational Integration in Mobility Services}{5}{subsection.2.5}\protected@file@percent }
-\citation{wang2022rangeentropy}
-\citation{fan2024umotion}
-\citation{xiong_learning_2023}
-\@writefile{toc}{\contentsline {section}{\numberline {3}Proposed Method}{7}{section.3}\protected@file@percent }
-\newlabel{sec:proposed_method}{{3}{7}{Proposed Method}{section.3}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Stage 1: Range-Image Autoencoder}{7}{subsection.3.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Stage 2: Spatio-Temporal Residual Coding}{7}{subsection.3.2}\protected@file@percent }
-\citation{xie2024roipcgc}
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Stage 3: Masked Representation Learning and Completion}{8}{subsection.3.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Stage 4: Task-Aware Bit Allocation}{8}{subsection.3.4}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Simplified LiDAR-only compression pipeline showing the range-image encoder (Stage\nobreakspace  1), temporal residual context (Stage\nobreakspace  2), masked completion decoder (Stage\nobreakspace  3), and optional task-aware bitrate control (Stage\nobreakspace  4).}}{9}{figure.caption.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2}Method and Model Families}{2}{section.2}\protected@file@percent }
+\newlabel{sec:method}{{2}{2}{Method and Model Families}{section.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Input and model pipeline}{2}{subsection.2.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Adaptive quantization}{2}{subsection.2.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}Model families used in this thesis}{2}{subsection.2.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {3}Loss Formulation}{3}{section.3}\protected@file@percent }
+\newlabel{sec:loss}{{3}{3}{Loss Formulation}{section.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Unified objective}{3}{subsection.3.1}\protected@file@percent }
+\newlabel{eq:total-loss}{{5}{3}{Unified objective}{equation.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Reconstruction loss}{3}{subsection.3.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Rate proxy loss}{3}{subsection.3.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Importance supervision loss}{3}{subsection.3.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.5}ROI/BG separation loss}{4}{subsection.3.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.6}Distillation loss}{4}{subsection.3.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.7}Why these losses were selected}{4}{subsection.3.7}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Loss-design decisions grounded in experiment evidence}}{5}{table.caption.6}\protected@file@percent }
 \providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
-\newlabel{fig:proposed-arch}{{1}{9}{Simplified LiDAR-only compression pipeline showing the range-image encoder (Stage~1), temporal residual context (Stage~2), masked completion decoder (Stage~3), and optional task-aware bitrate control (Stage~4)}{figure.caption.6}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {4}Sections and Headings}{10}{section.4}\protected@file@percent }
-\newlabel{sec:sections}{{4}{10}{Sections and Headings}{section.4}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Second Section Level}{10}{subsection.4.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.1.1}Third Section Level}{11}{subsubsection.4.1.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{\numberline {4.1.1.1}Fourth section level}{11}{paragraph.4.1.1.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {5}Example Sections}{12}{section.5}\protected@file@percent }
-\newlabel{sec:example_sections}{{5}{12}{Example Sections}{section.5}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {6}Mini-introduction to LaTeX}{13}{section.6}\protected@file@percent }
-\newlabel{sec:latex}{{6}{13}{Mini-introduction to LaTeX}{section.6}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Equations}{13}{subsection.6.1}\protected@file@percent }
-\newlabel{sec:latex:equations}{{6.1}{13}{Equations}{subsection.6.1}{}}
-\newlabel{eq:dot-product}{{1}{13}{Equations}{equation.1}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}Figures}{13}{subsection.6.2}\protected@file@percent }
-\newlabel{sec:latex:figures}{{6.2}{13}{Figures}{subsection.6.2}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Project architecture.}}{14}{figure.caption.7}\protected@file@percent }
-\newlabel{fig:proj-arch}{{2}{14}{Project architecture}{figure.caption.7}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.3}Tables}{14}{subsection.6.3}\protected@file@percent }
-\newlabel{sec:latex:tables}{{6.3}{14}{Tables}{subsection.6.3}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Dataset Characteristics}}{14}{table.caption.8}\protected@file@percent }
-\newlabel{tbl:dataset}{{1}{14}{Dataset Characteristics}{table.caption.8}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.4}Algorithms}{14}{subsection.6.4}\protected@file@percent }
-\newlabel{sec:latex:algorithms}{{6.4}{14}{Algorithms}{subsection.6.4}{}}
-\@writefile{loa}{\contentsline {algorithm}{\numberline {1}{\ignorespaces The Normalized 2-hop Left-Projection Algorithm}}{15}{algorithm.1}\protected@file@percent }
-\newlabel{alg:proj-motif}{{1}{15}{The Normalized 2-hop Left-Projection Algorithm}{algorithm.1}{}}
-\newlabel{alg:proj-motif-spgemm1}{{5}{15}{The Normalized 2-hop Left-Projection Algorithm}{algorithm.1}{}}
-\newlabel{alg:proj-motif-lk}{{8}{15}{The Normalized 2-hop Left-Projection Algorithm}{algorithm.1}{}}
-\newlabel{alg:proj-motif-accum}{{11}{15}{The Normalized 2-hop Left-Projection Algorithm}{algorithm.1}{}}
-\newlabel{alg:proj-motif-spgemm2}{{12}{15}{The Normalized 2-hop Left-Projection Algorithm}{algorithm.1}{}}
-\newlabel{alg:proj-motif-norm1}{{13}{15}{The Normalized 2-hop Left-Projection Algorithm}{algorithm.1}{}}
-\newlabel{alg:proj-motif-norm2}{{18}{15}{The Normalized 2-hop Left-Projection Algorithm}{algorithm.1}{}}
-\citation{anastasiu-dsaa2016}
-\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Graph and Projection Notation}}{16}{table.caption.9}\protected@file@percent }
-\newlabel{tbl:notation-g}{{2}{16}{Graph and Projection Notation}{table.caption.9}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.5}Location of Floats}{16}{subsection.6.5}\protected@file@percent }
-\newlabel{sec:latex:floats}{{6.5}{16}{Location of Floats}{subsection.6.5}{}}
-\citation{anastasiu-idsc2017}
-\citation{anastasiu-dsaa2016}
-\citation{kapoor-fie2018}
-\citation{anastasiu-icde2014,anastasiu2015,anastasiu-sc2015,anastasiu-sc2016}
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.6}Citations}{17}{subsection.6.6}\protected@file@percent }
-\newlabel{sec:latex:citations}{{6.6}{17}{Citations}{subsection.6.6}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {7}Writing Advice}{18}{section.7}\protected@file@percent }
-\newlabel{sec:writing}{{7}{18}{Writing Advice}{section.7}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {8}Future Work}{19}{section.8}\protected@file@percent }
-\newlabel{sec:future_work}{{8}{19}{Future Work}{section.8}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {9}Conclusions}{20}{section.9}\protected@file@percent }
-\newlabel{sec:conclusions}{{9}{20}{Conclusions}{section.9}{}}
+\newlabel{tab:loss-rationale-evidence}{{1}{5}{Loss-design decisions grounded in experiment evidence}{table.caption.6}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.8}Family-specific objectives and rationale}{5}{subsection.3.8}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Model-family objectives and motivation}}{5}{table.caption.7}\protected@file@percent }
+\newlabel{tab:family-objective}{{2}{5}{Model-family objectives and motivation}{table.caption.7}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4}Experimental Setup}{6}{section.4}\protected@file@percent }
+\newlabel{sec:setup}{{4}{6}{Experimental Setup}{section.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Data and training protocol}{6}{subsection.4.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Model and optimization defaults}{6}{subsection.4.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Loss recipe defaults}{6}{subsection.4.3}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Recipe-level default settings}}{6}{table.caption.8}\protected@file@percent }
+\newlabel{tab:recipes}{{3}{6}{Recipe-level default settings}{table.caption.8}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4}Teacher and head configurations}{6}{subsection.4.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Results and Intermediate Findings}{7}{section.5}\protected@file@percent }
+\newlabel{sec:results}{{5}{7}{Results and Intermediate Findings}{section.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Failure signal that drove loss redesign}{7}{subsection.5.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}150-epoch full sweeps with revised objectives}{7}{subsection.5.2}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces 150-epoch run summary}}{7}{table.caption.9}\protected@file@percent }
+\newlabel{tab:full-150}{{4}{7}{150-epoch run summary}{table.caption.9}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Quick 16-frame analysis snapshot}{7}{subsection.5.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Fair-budget pilot and oracle decomposition}{8}{subsection.5.4}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Native vs oracle ROI pilot (16-frame subset)}}{8}{table.caption.10}\protected@file@percent }
+\newlabel{tab:oracle-pilot}{{5}{8}{Native vs oracle ROI pilot (16-frame subset)}{table.caption.10}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.5}MS-ADS ablation status}{8}{subsection.5.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {6}Discussion}{9}{section.6}\protected@file@percent }
+\newlabel{sec:discussion}{{6}{9}{Discussion}{section.6}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}What improved}{9}{subsection.6.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}What remains unresolved}{9}{subsection.6.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.3}Planned visual analysis (next iteration)}{9}{subsection.6.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {7}Conclusion}{10}{section.7}\protected@file@percent }
+\newlabel{sec:conclusion}{{7}{10}{Conclusion}{section.7}{}}
 \@setckpt{sections}{
-\setcounter{page}{21}
-\setcounter{equation}{1}
+\setcounter{page}{11}
+\setcounter{equation}{15}
 \setcounter{enumi}{0}
 \setcounter{enumii}{0}
 \setcounter{enumiii}{0}
 \setcounter{enumiv}{0}
 \setcounter{footnote}{0}
 \setcounter{mpfootnote}{0}
-\setcounter{section}{9}
+\setcounter{section}{7}
 \setcounter{subsection}{0}
 \setcounter{subsubsection}{0}
 \setcounter{paragraph}{0}
 \setcounter{IEEEsubequation}{0}
-\setcounter{figure}{2}
-\setcounter{table}{2}
+\setcounter{figure}{0}
+\setcounter{table}{5}
 \setcounter{IEEEbiography}{0}
 \setcounter{section@level}{1}
 \setcounter{Item}{0}
 \setcounter{Hfootnote}{0}
-\setcounter{bookmark@seq@number}{29}
+\setcounter{bookmark@seq@number}{32}
 \setcounter{float@type}{16}
-\setcounter{algorithm}{1}
-\setcounter{ALG@line}{19}
+\setcounter{algorithm}{0}
+\setcounter{ALG@line}{0}
 \setcounter{ALG@rem}{0}
 \setcounter{ALG@nested}{0}
 \setcounter{ALG@Lnr}{2}

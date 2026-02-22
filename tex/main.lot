@@ -1,2 +1,6 @@
-\contentsline {table}{\numberline {1}{\ignorespaces Dataset Characteristics}}{14}{table.caption.8}%
-\contentsline {table}{\numberline {2}{\ignorespaces Graph and Projection Notation}}{16}{table.caption.9}%
+\contentsline {table}{\numberline {1}{\ignorespaces Loss-design decisions grounded in experiment evidence}}{5}{table.caption.6}%
+\contentsline {table}{\numberline {2}{\ignorespaces Model-family objectives and motivation}}{5}{table.caption.7}%
+\contentsline {table}{\numberline {3}{\ignorespaces Recipe-level default settings}}{6}{table.caption.8}%
+\contentsline {table}{\numberline {4}{\ignorespaces 150-epoch run summary}}{7}{table.caption.9}%
+\contentsline {table}{\numberline {5}{\ignorespaces Native vs oracle ROI pilot (16-frame subset)}}{8}{table.caption.10}%
+\contentsline {table}{\numberline {6}{\ignorespaces Primary experiment scripts and defaults}}{19}{table.caption.13}%

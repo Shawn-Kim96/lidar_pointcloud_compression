@@ -1,4 +1,0 @@
-\contentsline {figure}{\numberline {1}{\ignorespaces Simplified LiDAR-only compression pipeline showing the range-image encoder (Stage\nobreakspace 1), temporal residual context (Stage\nobreakspace 2), masked completion decoder (Stage\nobreakspace 3), and optional task-aware bitrate control (Stage\nobreakspace 4).}}{9}{figure.caption.6}%
-\contentsline {figure}{\numberline {2}{\ignorespaces Project architecture.}}{14}{figure.caption.7}%
-\contentsline {figure}{\numberline {3}{\ignorespaces Distribution of sample non-zeros.}}{25}{figure.caption.12}%
-\contentsline {figure}{\numberline {4}{\ignorespaces Speedup comparison of our method against baselines.}}{26}{figure.caption.14}%

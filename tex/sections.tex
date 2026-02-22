@@ -1,6 +1,7 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Introduction}\label{sec:introduction}
 This thesis studies end-to-end LiDAR range-image compression with explicit ROI-aware bit allocation for downstream perception. The core question is whether adaptive latent quantization can preserve task-relevant regions while reducing bitrate. For paper presentation, we report results by model family:
+\nocite{*} % Prevent empty bibliography errors before explicit \cite entries are added.
 \begin{itemize}
     \item \textbf{Uniform Baseline (UB)}: ROI-unaware uniform latent quantization.
     \item \textbf{Adaptive ROI Student (ARS)}: adaptive quantization with ROI supervision, no teacher.

@@ -1,14 +1,13 @@
 This is BibTeX, Version 0.99d (TeX Live 2025)
 Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
-The top-level auxiliary file: main.aux
+The top-level auxiliary file: mainbib.aux
 The style file: ieeetr.bst
-A level-1 auxiliary file: sections.aux
 Database file #1: references.bib
 Warning--empty journal in isenburg_laszip_nodate
 Warning--empty year in isenburg_laszip_nodate
 You've used 74 entries,
             1876 wiz_defined-function locations,
-            887 strings with 19536 characters,
+            886 strings with 19530 characters,
 and the built_in function-call counts, 22990 in all, are:
 = -- 2159
 > -- 1045

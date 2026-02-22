@@ -1,34 +1,38 @@
-\contentsline {section}{List of Tables}{ix}{section*.4}%
-\contentsline {section}{List of Figures}{x}{section*.5}%
+\contentsline {section}{List of Tables}{viii}{section*.4}%
+\contentsline {section}{List of Figures}{ix}{section*.5}%
  
 \contentsline {section}{\numberline {1}Introduction}{1}{section.1}%
-\contentsline {section}{\numberline {2}Literature Review}{3}{section.2}%
-\contentsline {subsection}{\numberline {2.1}Surveys and Evaluation Frameworks}{3}{subsection.2.1}%
-\contentsline {subsection}{\numberline {2.2}Learned Point Cloud Compression}{3}{subsection.2.2}%
-\contentsline {subsection}{\numberline {2.3}Task-Driven and Scene-Aware Pipelines}{4}{subsection.2.3}%
-\contentsline {subsection}{\numberline {2.4}Real-Time Robotics and Mapping Considerations}{5}{subsection.2.4}%
-\contentsline {subsection}{\numberline {2.5}Operational Integration in Mobility Services}{5}{subsection.2.5}%
-\contentsline {section}{\numberline {3}Proposed Method}{7}{section.3}%
-\contentsline {subsection}{\numberline {3.1}Stage 1: Range-Image Autoencoder}{7}{subsection.3.1}%
-\contentsline {subsection}{\numberline {3.2}Stage 2: Spatio-Temporal Residual Coding}{7}{subsection.3.2}%
-\contentsline {subsection}{\numberline {3.3}Stage 3: Masked Representation Learning and Completion}{8}{subsection.3.3}%
-\contentsline {subsection}{\numberline {3.4}Stage 4: Task-Aware Bit Allocation}{8}{subsection.3.4}%
-\contentsline {section}{\numberline {4}Sections and Headings}{10}{section.4}%
-\contentsline {subsection}{\numberline {4.1}Second Section Level}{10}{subsection.4.1}%
-\contentsline {subsubsection}{\numberline {4.1.1}Third Section Level}{11}{subsubsection.4.1.1}%
-\contentsline {paragraph}{\numberline {4.1.1.1}Fourth section level}{11}{paragraph.4.1.1.1}%
-\contentsline {section}{\numberline {5}Example Sections}{12}{section.5}%
-\contentsline {section}{\numberline {6}Mini-introduction to LaTeX}{13}{section.6}%
-\contentsline {subsection}{\numberline {6.1}Equations}{13}{subsection.6.1}%
-\contentsline {subsection}{\numberline {6.2}Figures}{13}{subsection.6.2}%
-\contentsline {subsection}{\numberline {6.3}Tables}{14}{subsection.6.3}%
-\contentsline {subsection}{\numberline {6.4}Algorithms}{14}{subsection.6.4}%
-\contentsline {subsection}{\numberline {6.5}Location of Floats}{16}{subsection.6.5}%
-\contentsline {subsection}{\numberline {6.6}Citations}{17}{subsection.6.6}%
-\contentsline {section}{\numberline {7}Writing Advice}{18}{section.7}%
-\contentsline {section}{\numberline {8}Future Work}{19}{section.8}%
-\contentsline {section}{\numberline {9}Conclusions}{20}{section.9}%
-\contentsline {section}{Literature Cited}{21}{section*.10}%
-\contentsline {section}{Appendix\nobreakspace A: What Should Be Included in Appendices}{24}{section*.11}%
-\contentsline {subsection}{\numberline {A.1}Subsections in Appendices}{24}{subsection.Appendix.A.1}%
-\contentsline {section}{Appendix\nobreakspace B: Title of Another Appendix}{26}{section*.13}%
+\contentsline {section}{\numberline {2}Method and Model Families}{2}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Input and model pipeline}{2}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}Adaptive quantization}{2}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}Model families used in this thesis}{2}{subsection.2.3}%
+\contentsline {section}{\numberline {3}Loss Formulation}{3}{section.3}%
+\contentsline {subsection}{\numberline {3.1}Unified objective}{3}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}Reconstruction loss}{3}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}Rate proxy loss}{3}{subsection.3.3}%
+\contentsline {subsection}{\numberline {3.4}Importance supervision loss}{3}{subsection.3.4}%
+\contentsline {subsection}{\numberline {3.5}ROI/BG separation loss}{4}{subsection.3.5}%
+\contentsline {subsection}{\numberline {3.6}Distillation loss}{4}{subsection.3.6}%
+\contentsline {subsection}{\numberline {3.7}Why these losses were selected}{4}{subsection.3.7}%
+\contentsline {subsection}{\numberline {3.8}Family-specific objectives and rationale}{5}{subsection.3.8}%
+\contentsline {section}{\numberline {4}Experimental Setup}{6}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Data and training protocol}{6}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}Model and optimization defaults}{6}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}Loss recipe defaults}{6}{subsection.4.3}%
+\contentsline {subsection}{\numberline {4.4}Teacher and head configurations}{6}{subsection.4.4}%
+\contentsline {section}{\numberline {5}Results and Intermediate Findings}{7}{section.5}%
+\contentsline {subsection}{\numberline {5.1}Failure signal that drove loss redesign}{7}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}150-epoch full sweeps with revised objectives}{7}{subsection.5.2}%
+\contentsline {subsection}{\numberline {5.3}Quick 16-frame analysis snapshot}{7}{subsection.5.3}%
+\contentsline {subsection}{\numberline {5.4}Fair-budget pilot and oracle decomposition}{8}{subsection.5.4}%
+\contentsline {subsection}{\numberline {5.5}MS-ADS ablation status}{8}{subsection.5.5}%
+\contentsline {section}{\numberline {6}Discussion}{9}{section.6}%
+\contentsline {subsection}{\numberline {6.1}What improved}{9}{subsection.6.1}%
+\contentsline {subsection}{\numberline {6.2}What remains unresolved}{9}{subsection.6.2}%
+\contentsline {subsection}{\numberline {6.3}Planned visual analysis (next iteration)}{9}{subsection.6.3}%
+\contentsline {section}{\numberline {7}Conclusion}{10}{section.7}%
+\contentsline {section}{Literature Cited}{11}{section*.11}%
+\contentsline {section}{Appendix\nobreakspace A: Reproducibility Configuration}{19}{section*.12}%
+\contentsline {subsection}{\numberline {A.1}Teacher setup}{19}{subsection.Appendix.A.1}%
+\contentsline {section}{Appendix\nobreakspace B: Intermediate Artifact Index}{20}{section*.14}%
+\contentsline {section}{Appendix\nobreakspace C: Planned Figures for Next Draft}{21}{section*.15}%

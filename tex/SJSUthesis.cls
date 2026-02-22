@@ -457,7 +457,7 @@
   \def\nocite#1{\@bsphack
     \@for\@citeb:=#1\do{%
       \edef\@citeb{\expandafter\@firstofone\@citeb}%
-      \if@filesw\immediate\write12{\string\citation{\@citeb}}\fi
+      \if@filesw\immediate\write\@auxout{\string\citation{\@citeb}}\fi
     }\@esphack}
 
   % Redefine \bibliographystyle and \bibliography to do nothing 
@@ -917,4 +917,3 @@
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%% End of SJSUthesis.cls  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % That's all folks!
-
