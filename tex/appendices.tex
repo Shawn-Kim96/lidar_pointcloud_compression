@@ -1,6 +1,48 @@
-\section{Reproducibility Configuration}\label{apx:repro}
-This appendix lists experiment scripts and default settings used in the current thesis draft.
+\section{Naming and Stage Mapping}\label{apx:naming-map}
+The thesis body uses model-family names to improve readability, while experiment scripts and logs use internal stage labels. Table~\ref{tab:naming-map} provides the reproducibility mapping.
 
+\begin{table}[!htb]
+\caption{Model-family naming used in the manuscript and internal stage mapping}
+\label{tab:naming-map}
+\centering
+\small
+\begin{tabular}{l l l}
+\toprule
+\textbf{Manuscript family} & \textbf{Internal stage label} & \textbf{Core setting} \\
+\midrule
+Uniform Baseline (UB) & Stage0 & uniform quantization, reconstruction-only objective \\
+Adaptive ROI Student (ARS) & Stage1 & adaptive quantization + ROI supervision, no teacher \\
+Adaptive Distilled Student (ADS) & Stage2 & ARS objective + teacher distillation \\
+Multi-Scale Distilled Student (MS-ADS) & Stage3 & ADS objective + multi-scale ROI head variants \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Objective-to-Implementation Traceability}\label{apx:traceability}
+To keep the main text theory-focused, equation-to-code traceability is summarized here.
+
+\begin{table}[!htb]
+\caption{Traceability map: equations/terms to implementation locations}
+\label{tab:traceability}
+\centering
+\small
+\begin{tabular}{p{0.17\textwidth} p{0.27\textwidth} p{0.48\textwidth}}
+\toprule
+\textbf{Main-text term} & \textbf{Equation} & \textbf{Primary implementation} \\
+\midrule
+Total objective & Eq.~\ref{eq:total-objective} & \texttt{src/train/trainer.py}: weighted sum in \texttt{train\_epoch()} \\
+Reconstruction loss & Eq.~\ref{eq:recon-loss} & \texttt{src/train/trainer.py}: \texttt{nn.MSELoss()} as \texttt{criterion\_recon} \\
+Level map construction & Eq.~\ref{eq:level-map}--\ref{eq:rounded-level} & \texttt{src/models/quantization.py}: \texttt{AdaptiveQuantizer.forward()} \\
+Rate proxy (global/norm-global/norm-bg) & Eq.~\ref{eq:rate-global}--\ref{eq:rate-norm-bg} & \texttt{src/train/trainer.py}: \texttt{\_compute\_rate\_loss()} with \texttt{rate\_loss\_mode} \\
+Weighted BCE importance & Eq.~\ref{eq:imp-bce}--\ref{eq:imp-posweight} & \texttt{src/train/trainer.py}: \texttt{\_build\_importance\_pos\_weight()}, \texttt{\_compute\_importance\_loss()} \\
+ROI/BG separation margin & Eq.~\ref{eq:sep-loss} & \texttt{src/train/trainer.py}: \texttt{\_compute\_importance\_separation()} \\
+Distillation objective & Eq.~\ref{eq:distill-total} & \texttt{src/loss/distill\_loss.py}: \texttt{DistillLoss}; invoked in \texttt{src/train/trainer.py} \\
+Family pipeline & Eq.~\ref{eq:pipeline} & \texttt{src/models/compression.py}, \texttt{src/models/importance\_head.py}, \texttt{src/models/stage3\_necks.py} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Reproducibility Configuration}\label{apx:repro}
 \begin{table}[!htb]
 \caption{Primary experiment scripts and defaults}
 \label{tab:appendix-scripts}
@@ -10,50 +52,28 @@ This appendix lists experiment scripts and default settings used in the current 
 \toprule
 \textbf{Family} & \textbf{Script} & \textbf{Key defaults} \\
 \midrule
-UB (internal Stage0) &
-\texttt{src/scripts/run\_uniform\_baseline.sh} &
-\texttt{quantizer\_mode=uniform}, bits sweep \{4,6,8\}, \\
-&& \texttt{lambda\_recon=1.0}, others 0 \\
-ARS (internal Stage1) &
-\texttt{src/scripts/run\_stage1.sh} &
-\texttt{balanced\_v1}, \texttt{normalized\_global}, \\
-&& \texttt{weighted\_bce}, \texttt{roi\_target\_mode=maxpool} \\
-ADS (internal Stage2) &
-\texttt{src/scripts/run\_stage2.sh} &
-\texttt{balanced\_v2}, \texttt{normalized\_bg}, \\
-&& \texttt{lambda\_distill} sweep \{0.1,0.5,1.0\} \\
-MS-ADS (internal Stage3) &
-\texttt{src/scripts/run\_stage3\_multiscale\_heads.sh} &
-Head sweep \{\texttt{bifpn}, \texttt{deformable\_msa}, \\
-&& \texttt{dynamic}, \texttt{rangeformer}, \texttt{frnet}\} \\
+UB & \texttt{src/scripts/run\_uniform\_baseline.sh} & \texttt{quantizer\_mode=uniform}, bits sweep \{4,6,8\} \\
+ARS & \texttt{src/scripts/run\_stage1.sh} & \texttt{balanced\_v1}, \texttt{normalized\_global}, weighted BCE \\
+ADS & \texttt{src/scripts/run\_stage2.sh} & \texttt{balanced\_v2}, \texttt{normalized\_bg}, distill sweep \(\lambda_d\in\{0.1,0.5,1.0\}\) \\
+MS-ADS & \texttt{src/scripts/run\_stage3\_multiscale\_heads.sh} & head sweep \{\texttt{bifpn}, \texttt{deformable\_msa}, \texttt{dynamic}, \texttt{rangeformer}, \texttt{frnet}\} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\subsection{Teacher setup}
-Teacher backend for ADS/MS-ADS is \texttt{pointpillars\_zhulf}, using checkpoint:
+Teacher backend for ADS/MS-ADS is \texttt{pointpillars\_zhulf}, using checkpoint
 \begin{equation}
 \texttt{data/checkpoints/pointpillars\_epoch\_160.pth}.
 \end{equation}
 
-\section{Intermediate Artifact Index}\label{apx:artifacts}
-The following files were used to build the tables and intermediate analysis in this draft:
+\section{Artifact Index and Planned Figures}\label{apx:artifacts}
+The following artifacts were used to build the result tables in this draft:
 \begin{itemize}
     \item \texttt{src/results/experiments\_result.csv}
     \item \texttt{src/results/experiments\_result.md}
-    \item \texttt{docs/report/experiments.md}
-    \item \texttt{docs/notes/research\_progress.md}
     \item \texttt{notebooks/quick\_eval\_summary\_16frames.csv}
     \item \texttt{notebooks/oracle\_eval\_summary\_260219\_resnet\_pilot\_s1adapt.csv}
     \item \texttt{notebooks/oracle\_eval\_summary\_260219\_resnet\_pilot\_s2distill.csv}
     \item \texttt{notebooks/matched\_bitrate\_pairs\_260219\_pilot.csv}
 \end{itemize}
 
-\section{Planned Figures for Next Draft}\label{apx:planned-figures}
-This version intentionally omits figures. The next draft should include:
-\begin{itemize}
-    \item threshold sweep plots (precision, recall, IoU vs threshold) per ARS/ADS run,
-    \item bitrate-distortion plots (native vs oracle ROI and uniform matched-budget),
-    \item qualitative ROI visualization panels:
-    input range/intensity, ground-truth ROI mask, predicted importance map, predicted ROI binary map.
-\end{itemize}
+No figures are inserted in this revision. The next revision should add: (i) threshold sweep curves (precision/recall/IoU), (ii) matched-budget bitrate-distortion plots, and (iii) qualitative panels of input channels, GT ROI, predicted importance, and thresholded ROI.

@@ -1,319 +1,206 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Introduction}\label{sec:introduction}
-This thesis studies end-to-end LiDAR range-image compression with explicit ROI-aware bit allocation for downstream perception. The core question is whether adaptive latent quantization can preserve task-relevant regions while reducing bitrate. For paper presentation, we report results by model family:
-\nocite{*} % Prevent empty bibliography errors before explicit \cite entries are added.
-\begin{itemize}
-    \item \textbf{Uniform Baseline (UB)}: ROI-unaware uniform latent quantization.
-    \item \textbf{Adaptive ROI Student (ARS)}: adaptive quantization with ROI supervision, no teacher.
-    \item \textbf{Adaptive Distilled Student (ADS)}: ARS plus teacher distillation.
-    \item \textbf{Multi-Scale Distilled Student (MS-ADS)}: ADS objective with stronger multi-scale ROI heads.
-\end{itemize}
+\section{Problem Statement, Research Question, and Contributions}\label{sec:introduction}
+Modern autonomous driving pipelines depend on high-throughput LiDAR, but raw stream size quickly overwhelms storage and communication budgets. In this thesis, the target problem is not only geometric reconstruction quality, but also whether compression can preserve task-relevant regions so that downstream perception remains reliable at lower bitrate.
 
-This document consolidates the actual code path, loss equations, experiment settings, and intermediate-to-latest results from the current repository and logs.
+The central research question is: \emph{Can importance-aware latent quantization improve task-relevant reconstruction under constrained bitrate compared with uniform quantization?} This question is investigated through an end-to-end range-image codec trained on SemanticKITTI projections.
+
+For manuscript clarity, experiments are reported by model family rather than internal script stage names: \textbf{Uniform Baseline (UB)}, \textbf{Adaptive ROI Student (ARS)}, \textbf{Adaptive Distilled Student (ADS)}, and \textbf{Multi-Scale Distilled Student (MS-ADS)}. Internal Stage0--3 mapping is retained only in Appendix~\ref{apx:naming-map} for reproducibility.
+
+This draft makes three concrete contributions. First, it defines a code-faithful objective decomposition for ROI-aware LiDAR compression and documents why each loss component was introduced. Second, it reports a fixed evidence snapshot (February 20, 2026) with confirmed Stage0--2 outcomes and separated Stage3 preliminary outcomes. Third, it provides bottleneck decomposition via native-vs-oracle ROI analysis to distinguish quantizer potential from importance-map quality limitations.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Method and Model Families}\label{sec:method}
-\subsection{Input and model pipeline}
-Each LiDAR scan is projected to a 5-channel range image $x \in \mathbb{R}^{B \times 5 \times H \times W}$ with channels \texttt{range, intensity, x, y, z}. The forward path is:
-\begin{equation}
-x \xrightarrow[]{\text{encoder}} z \xrightarrow[]{\text{importance head}} p \xrightarrow[]{\text{quantization}} \hat{z} \xrightarrow[]{\text{decoder}} \hat{x}.
-\end{equation}
-Backbones are ResNet-style encoder or DarkNet encoder, with latent projection to 64 channels. For MS-ADS variants, multi-stage encoder taps are additionally consumed by the ROI head.
+\section{Related Work}\label{sec:related_work}
 
-\subsection{Adaptive quantization}
-For adaptive mode, the importance map $p \in [0,1]$ controls quantization levels:
-\begin{equation}
-\ell = b_{\text{bg}} + p\,(b_{\text{roi}} - b_{\text{bg}}),
-\end{equation}
-followed by rounding/clamping $\tilde{\ell} = \max(2,\text{round}(\ell))$. With per-sample normalization:
-\begin{equation}
-z_{\text{norm}} = \frac{z - z_{\min}}{z_{\max}-z_{\min}+\epsilon}, \quad
-q = \text{round}\!\left(z_{\text{norm}}(\tilde{\ell}-1)\right),
-\end{equation}
-\begin{equation}
-\hat{z} = \frac{q}{\tilde{\ell}-1+\epsilon}(z_{\max}-z_{\min}) + z_{\min}.
-\end{equation}
-In this codebase, larger importance yields larger level count (finer quantization), not coarser.
+\subsection{Learned LiDAR Compression}
+Classical LiDAR compression pipelines such as LASzip remain an important lossless baseline in operational systems, but they are not designed for task-aware distortion allocation under strict bitrate constraints~\cite{isenburg2013laszip}. Recent learned methods shift the objective toward rate--distortion optimization in structured representations. Range-image-focused codecs and entropy models report meaningful gains by exploiting 2D regularity in projected LiDAR data~\cite{wang2022rangeentropy,liu2024octreedepth}. Temporal predictive approaches further reduce redundancy by encoding innovation across frames instead of fully independent scans~\cite{fan2024umotion,sun2025lpcm}.
 
-\subsection{Model families used in this thesis}
-\begin{itemize}
-    \item \textbf{UB}: \texttt{quantizer\_mode=uniform}. No teacher, no importance supervision.
-    \item \textbf{ARS}: \texttt{quantizer\_mode=adaptive} + ROI supervision from SemanticKITTI ROI mask.
-    \item \textbf{ADS}: ARS + teacher distillation (\texttt{pointpillars\_zhulf} backend).
-    \item \textbf{MS-ADS}: ADS objective maintained, but ROI head replaced by multi-scale variants (\texttt{bifpn, deformable\_msa, dynamic, rangeformer, frnet}).
-\end{itemize}
+\subsection{ROI- and Task-Aware Compression}
+A second line of work introduces semantic or task priors into bit allocation. ROI-guided compression methods emphasize that detection-relevant regions should receive finer coding granularity under equal global budget~\cite{xie2024roipcgc}. Scene-aware coding studies also show that pure geometric rate--distortion metrics may not correlate with downstream perception quality, motivating objective terms that align codec behavior with task utility~\cite{sun2023salpcc,martins2024impact}.
+
+\subsection{Distillation and Representation Guidance}
+Teacher-guided training has been widely used to transfer richer feature priors into compact students in perception systems. For LiDAR compression-adjacent tasks, the practical value of distillation is not only lower loss but better calibration of task-relevant signals in difficult regimes. This thesis adopts that perspective and evaluates whether distillation improves ROI signal quality when adaptive quantization is controlled by a learned importance map.
+
+\subsection{Deployment-Oriented Systems and PointCompress3D Comparison}
+PointCompress3D demonstrates a strong systems-oriented framework for roadside LiDAR compression and streaming, integrating multiple codecs and reporting deployment metrics such as runtime and downstream detection behavior~\cite{zimmer2024pointcompress3d}. The present thesis differs in scope and optimization target. PointCompress3D primarily compares codec alternatives and deployment tradeoffs at the system level, while this work focuses on a single trainable adaptive quantization pipeline with explicit ROI supervision and loss ablations. The comparison is therefore complementary: PointCompress3D motivates practical deployment constraints, and this thesis investigates objective-level mechanisms for ROI-aware bit allocation inside an end-to-end trainable codec.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Loss Formulation}\label{sec:loss}
-\subsection{Unified objective}
-The implemented training objective is:
+\section{Methodology and Model Families}\label{sec:method}
+
+\subsection{Pipeline Definition}
+Each LiDAR scan is projected to a five-channel range image
 \begin{equation}
-\mathcal{L}_{\text{total}} =
-\lambda_{\text{recon}}\mathcal{L}_{\text{recon}} +
-\lambda_{\text{distill}}\mathcal{L}_{\text{distill}} +
-\lambda_{\text{rate}}\mathcal{L}_{\text{rate}} +
-\lambda_{\text{imp}}\mathcal{L}_{\text{imp}} +
-\lambda_{\text{sep}}\mathcal{L}_{\text{sep}}.
-\label{eq:total-loss}
+\mathbf{x} \in \mathbb{R}^{B\times5\times H\times W},
+\end{equation}
+with channels \texttt{range}, \texttt{intensity}, and Cartesian \texttt{x/y/z}. The forward path is
+\begin{equation}
+\mathbf{x} \xrightarrow{\text{encoder}} \mathbf{z} \xrightarrow{\text{importance head}} \mathbf{p} \xrightarrow{\text{adaptive quantizer}} \hat{\mathbf{z}} \xrightarrow{\text{decoder}} \hat{\mathbf{x}}.
+\label{eq:pipeline}
 \end{equation}
 
-\subsection{Reconstruction loss}
+Backbones are ResNet-style or DarkNet-style encoders with latent width 64. In multi-scale variants, encoder stage taps are passed to the ROI head via a dedicated fusion neck.
+
+\subsection{Adaptive Quantization Parameterization}
+Importance probability \(\mathbf{p}\in[0,1]\) modulates the local quantization levels:
 \begin{equation}
-\mathcal{L}_{\text{recon}} = \text{MSE}(\hat{x}, x).
+\ell = b_{\mathrm{bg}} + \mathbf{p}\,(b_{\mathrm{roi}}-b_{\mathrm{bg}}),
+\label{eq:level-map}
+\end{equation}
+followed by
+\begin{equation}
+\tilde{\ell}=\max(2,\mathrm{round}(\ell)).
+\label{eq:rounded-level}
+\end{equation}
+In the current implementation, larger importance yields \emph{larger} level count (finer quantization), which is the intended behavior for preserving ROI details.
+
+\subsection{Family Definitions}
+\textbf{UB} uses uniform latent quantization without ROI supervision or teacher guidance. \textbf{ARS} enables adaptive quantization and ROI supervision from SemanticKITTI-derived masks. \textbf{ADS} extends ARS with teacher distillation from the \texttt{pointpillars\_zhulf} adapter path. \textbf{MS-ADS} keeps the ADS objective and replaces the ROI head with stronger multi-scale variants (\texttt{bifpn}, \texttt{deformable\_msa}, \texttt{dynamic}, \texttt{rangeformer}, \texttt{frnet}).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Objective and Loss Design}\label{sec:loss}
+
+\subsection{Notation}
+Let \(\hat{\mathbf{x}}\) be reconstruction, \(\mathbf{z}\) latent feature, \(\mathbf{s}\) importance logits, \(\mathbf{m}\) ROI target, and \(\tilde{\ell}\) rounded level map from Equation~\ref{eq:rounded-level}. The training objective is
+\begin{equation}
+\mathcal{L}_{\mathrm{total}}=
+\lambda_{\mathrm{recon}}\mathcal{L}_{\mathrm{recon}}+
+\lambda_{\mathrm{distill}}\mathcal{L}_{\mathrm{distill}}+
+\lambda_{\mathrm{rate}}\mathcal{L}_{\mathrm{rate}}+
+\lambda_{\mathrm{imp}}\mathcal{L}_{\mathrm{imp}}+
+\lambda_{\mathrm{sep}}\mathcal{L}_{\mathrm{sep}}.
+\label{eq:total-objective}
 \end{equation}
 
-\subsection{Rate proxy loss}
-Let normalized level map be:
+\subsection{Reconstruction Term}
 \begin{equation}
-\ell_{\text{norm}} = \frac{\tilde{\ell} - b_{\text{bg}}}{b_{\text{roi}} - b_{\text{bg}}}.
+\mathcal{L}_{\mathrm{recon}}=\mathrm{MSE}(\hat{\mathbf{x}},\mathbf{x}).
+\label{eq:recon-loss}
 \end{equation}
-Three implemented modes are:
-\begin{equation}
-\mathcal{L}_{\text{rate}}^{\text{global}} = \text{mean}(\tilde{\ell}),
-\end{equation}
-\begin{equation}
-\mathcal{L}_{\text{rate}}^{\text{norm-global}} = \text{mean}(\ell_{\text{norm}}),
-\end{equation}
-\begin{equation}
-\mathcal{L}_{\text{rate}}^{\text{norm-bg}} =
-\frac{\sum (\ell_{\text{norm}} \odot w_{\text{bg}})}{\sum w_{\text{bg}}},
-\end{equation}
-where
-\begin{equation}
-w_{\text{bg}}=
-\begin{cases}
-1-m, & \text{if ROI target } m \text{ exists},\\
-1-\text{stopgrad}(p), & \text{otherwise}.
-\end{cases}
-\end{equation}
+This term stabilizes global geometry and channel-wise consistency. It is the only active term in UB and defines the anchor reference for all adaptive families.
 
-\subsection{Importance supervision loss}
+\subsection{Rate Proxy Term}
+Rate regularization is implemented on quantization levels, not direct entropy-model likelihood. The legacy form is
 \begin{equation}
-\mathcal{L}_{\text{imp}} =
-\text{BCEWithLogits}(s, m; \text{pos\_weight}),
+\mathcal{L}_{\mathrm{rate}}^{\mathrm{global}}=\mathrm{mean}(\tilde{\ell}).
+\label{eq:rate-global}
 \end{equation}
-with logits $s$ from the importance head and ROI target $m$. In \texttt{weighted\_bce} mode:
+Because this form directly penalizes larger levels everywhere, it can conflict with ROI elevation. To reduce that conflict, normalized variants are used:
 \begin{equation}
-\text{pos\_weight}=
-\text{clip}\!\left(\frac{N_{\text{neg}}}{\max(N_{\text{pos}},1)},\,1,\,w_{\max}\right).
+\ell_{\mathrm{norm}}=\frac{\tilde{\ell}-b_{\mathrm{bg}}}{b_{\mathrm{roi}}-b_{\mathrm{bg}}},
+\label{eq:rate-norm-def}
 \end{equation}
-ROI target downsampling mode is one of \texttt{nearest}, \texttt{maxpool}, \texttt{area}.
+\begin{equation}
+\mathcal{L}_{\mathrm{rate}}^{\mathrm{norm\mbox{-}global}}=\mathrm{mean}(\ell_{\mathrm{norm}}),
+\label{eq:rate-norm-global}
+\end{equation}
+\begin{equation}
+\mathcal{L}_{\mathrm{rate}}^{\mathrm{norm\mbox{-}bg}}=\frac{\sum(\ell_{\mathrm{norm}}\odot w_{\mathrm{bg}})}{\sum w_{\mathrm{bg}}},\quad
+w_{\mathrm{bg}}=1-\mathbf{m}\;\text{(if ROI target exists)}.
+\label{eq:rate-norm-bg}
+\end{equation}
+The normalized modes were introduced because empirical collapse showed that excessive global rate pressure can drive importance toward floor values.
 
-\subsection{ROI/BG separation loss}
+\subsection{Importance Supervision Term}
+Importance logits are supervised by binary cross-entropy:
 \begin{equation}
-\mathcal{L}_{\text{sep}} =
-\max\!\left(0,\;\delta - (\mu_{\text{roi}} - \mu_{\text{bg}})\right),
+\mathcal{L}_{\mathrm{imp}}=\mathrm{BCEWithLogits}(\mathbf{s},\mathbf{m};\mathrm{pos\_weight}).
+\label{eq:imp-bce}
 \end{equation}
-where $\mu_{\text{roi}}$ and $\mu_{\text{bg}}$ are mean sigmoid importance over ROI and background masks.
-
-\subsection{Distillation loss}
-The composite distillation loss is:
+Under class imbalance, weighted BCE uses
 \begin{equation}
-\mathcal{L}_{\text{distill}} =
-\alpha_f \mathcal{L}_f + \alpha_\ell \mathcal{L}_\ell.
+\mathrm{pos\_weight}=\mathrm{clip}\!\left(\frac{N_{\mathrm{neg}}}{\max(N_{\mathrm{pos}},1)},1,w_{\max}\right).
+\label{eq:imp-posweight}
 \end{equation}
-Feature distillation uses weighted MSE between channel-mean student latent and channel-mean teacher feature. Logit distillation uses mode \texttt{auto/kl/bce/mse}; in \texttt{auto}, single-channel logits use BCE and multi-channel logits use KL.
+This weighting is necessary because ROI positives become sparse after downsampling to latent-scale supervision.
 
-\subsection{Why these losses were selected}
-Loss design was changed based on observed failure modes in our experiments, not only by prior expectation.
-\begin{itemize}
-    \item \textbf{From legacy to normalized rate loss}: legacy used raw \texttt{mean(level\_map)} (\texttt{global\_mean}), which strongly penalized higher importance and contributed to collapse. This behavior is discussed in the project logs as ``importance collapse'' with empty ROI predictions at threshold 0.5.
-    \item \textbf{From BCE to weighted BCE}: ROI positives are sparse after heavy downsampling, so weighted BCE with auto \texttt{pos\_weight} was adopted to reduce the trivial all-background solution.
-    \item \textbf{Adding separation margin}: \texttt{balanced\_v2} adds ROI/BG separation to improve operating-point selectivity, especially when false positives dominate at fixed threshold.
-    \item \textbf{Distillation logit mode}: single-channel logit distillation uses BCE in \texttt{auto} mode to avoid degenerate KL behavior.
-\end{itemize}
+\subsection{ROI/BG Separation Margin}
+To improve operating-point separation between ROI and background, the objective adds
+\begin{equation}
+\mathcal{L}_{\mathrm{sep}}=\max\left(0,\delta-(\mu_{\mathrm{roi}}-\mu_{\mathrm{bg}})\right),
+\label{eq:sep-loss}
+\end{equation}
+where \(\mu_{\mathrm{roi}}\) and \(\mu_{\mathrm{bg}}\) are mean sigmoid importance over ROI and background support. This term is meant to reduce calibration failure in high-recall/high-FP regimes.
+
+\subsection{Distillation Term}
+Distillation combines feature and logit alignment:
+\begin{equation}
+\mathcal{L}_{\mathrm{distill}}=\alpha_f\mathcal{L}_f+\alpha_{\ell}\mathcal{L}_{\ell}.
+\label{eq:distill-total}
+\end{equation}
+Feature alignment uses weighted MSE between channel-mean student latent and teacher feature maps. Logit alignment supports \texttt{auto/kl/bce/mse}; in \texttt{auto}, single-channel logits use BCE while multi-channel logits use KL, avoiding degenerate one-channel KL behavior.
+
+\subsection{Why This Objective Was Adopted}
+The objective is evidence-driven. First, collapse cases with threshold-0.5 outputs \((TP=0,FP=0,FN>0)\) motivated replacing legacy global rate penalty with normalized modes. Second, sparse ROI support motivated weighted BCE rather than plain BCE. Third, persistent FP-heavy behavior in quick evaluation motivated introducing ROI/BG margin separation. Fourth, native-vs-oracle decomposition showed large bitrate-proxy reduction at nearly fixed ROI-MSE, indicating that quantizer potential exists and ROI quality/calibration is the dominant bottleneck.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Experimental Setup (Snapshot: February 20, 2026)}\label{sec:setup}
+Training uses SemanticKITTI sequences \texttt{00,01,02,03,04,05,06,07,09,10} projected to range images. Unless otherwise stated, latent channels are 64 and adaptive quantization defaults are \(b_{\mathrm{roi}}=256\), \(b_{\mathrm{bg}}=16\). Optimizer is AdamW with base learning rate \(10^{-4}\).
+
+UB sweeps uniform bits, while ARS/ADS/MS-ADS use adaptive quantization and ROI supervision with \texttt{roi\_target\_mode=maxpool} in current recipes. Balanced defaults are: ARS uses \texttt{balanced\_v1} (normalized global rate + weighted BCE), ADS/MS-ADS use \texttt{balanced\_v2} (normalized background-weighted rate + weighted BCE + separation margin).
+
+Teacher guidance in ADS/MS-ADS is provided through \texttt{pointpillars\_zhulf} with checkpoint \texttt{data/checkpoints/pointpillars\_epoch\_160.pth}. For fast diagnosis, a 16-frame evaluation subset is used in parallel with full 150-epoch sweeps.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Results: Confirmed Outcomes and Preliminary Stage3}\label{sec:results}
+
+\subsection{Confirmed Results (UB/ARS/ADS)}
+Table~\ref{tab:confirmed-best} reports best available runs per confirmed family within the fixed snapshot. These values should be interpreted with objective awareness, since families optimize different composite losses.
 
 \begin{table}[!htb]
-\caption{Loss-design decisions grounded in experiment evidence}
-\label{tab:loss-rationale-evidence}
+\caption{Best confirmed runs at snapshot (Stage0--2 equivalent families)}
+\label{tab:confirmed-best}
 \centering
 \small
-\begin{tabular}{l l l}
+\begin{tabular}{l l c c c}
 \toprule
-\textbf{Decision} & \textbf{Observed issue} & \textbf{Evidence} \\
+\textbf{Family} & \textbf{Best run} & \textbf{Final loss} & \textbf{Eq bits} & \textbf{Code entropy} \\
 \midrule
-\texttt{global\_mean} $\rightarrow$ normalized rate &
-importance collapse under legacy objective &
-threshold-0.5 collapse reports with $TP=0,FP=0,FN>0$ \\
-plain BCE $\rightarrow$ weighted BCE &
-ROI positive sparsity after downsampling &
-negative ROI/BG gap in quick 16-frame diagnostics \\
-add separation margin ($\lambda_{\text{sep}}>0$) &
-high-FP behavior at fixed threshold &
-Cycle-F logs: high recall but poor precision/IoU \\
-native vs oracle analysis &
-identify bottleneck location &
-ARS: $bpp_{ent}$ 0.8064$\rightarrow$0.4177, ADS: 0.8687$\rightarrow$0.4492 \\
+UB & \texttt{260219\_resnet\_uniform\_q8\_j21804\_r5} & 0.5941 & 8.0000 & 6.2647 \\
+ARS & \texttt{260216\_resnet\_lr1e-4\_j21424\_r1} & 0.7224 & n/a & n/a \\
+ADS & \texttt{260219\_resnet\_ld0.1\_j21820\_r2} & 1.3821 & 4.6973 & 2.8483 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\subsection{Family-specific objectives and rationale}
-\begin{table}[!htb]
-\caption{Model-family objectives and motivation}
-\label{tab:family-objective}
-\centering
-\small
-\begin{tabular}{l l l}
-\toprule
-\textbf{Family} & \textbf{Effective default objective} & \textbf{Motivation from experiments} \\
-\midrule
-UB &
-$\mathcal{L}_{\text{total}}=\mathcal{L}_{\text{recon}}$ &
-Reference point for ROI-unaware compression. \\
-ARS &
-$1.0\mathcal{L}_{\text{recon}} + 0.02\mathcal{L}_{\text{rate}} + 1.0\mathcal{L}_{\text{imp}}$ &
-Avoid collapse seen in legacy objective. \\
-ADS &
-$1.0\mathcal{L}_{\text{recon}} + \lambda_d\mathcal{L}_{\text{distill}} + 0.02\mathcal{L}_{\text{rate}} + 1.0\mathcal{L}_{\text{imp}} + 0.2\mathcal{L}_{\text{sep}}$ &
-Improve ROI signal quality and calibration. \\
-MS-ADS &
-Same as ADS, with multi-scale ROI-head ablation &
-Test whether architecture capacity improves selectivity. \\
-\bottomrule
-\end{tabular}
-\end{table}
+For 150-epoch ADS sweeps, \(\lambda_{\mathrm{distill}}=0.1\) consistently outperformed larger distillation weights on both backbones in this snapshot. On ResNet, final losses were 1.3821 (0.1), 1.9889 (0.5), and 2.3589 (1.0). On DarkNet, corresponding values were 2.1698 (0.1), 2.7831 (0.5), and 3.1329 (1.0).
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Experimental Setup}\label{sec:setup}
-\subsection{Data and training protocol}
-The training dataset is SemanticKITTI projected to range images, using sequences \texttt{00,01,02,03,04,05,06,07,09,10}. For fast diagnosis, a 16-frame evaluation subset is also used in notebook-based quick evaluation and oracle/native analysis.
+\subsection{Quick 16-Frame Diagnostic}
+The 16-frame diagnostic confirms that raw reconstruction loss alone is insufficient to judge ROI operating behavior. Summary rows from \texttt{notebooks/quick\_eval\_summary\_16frames.csv} show UB (ResNet q8) all-MSE 13.4235 and ROI-MSE 24.8127, ARS (ResNet) all-MSE 10.9570 and ROI-MSE 19.8815, and ADS (DarkNet, \(\lambda_d=0.1\)) all-MSE 29.5963 and ROI-MSE 86.1911. The same report also indicates negative ROI-vs-BG importance gap for multiple adaptive runs, aligning with FP-heavy threshold behavior.
 
-\subsection{Model and optimization defaults}
-\begin{itemize}
-    \item Input channels: 5.
-    \item Latent channels: 64.
-    \item Backbones: ResNet encoder or DarkNet encoder.
-    \item Adaptive quantization defaults: $b_{\text{roi}}=256$, $b_{\text{bg}}=16$.
-    \item Uniform baseline bits: typically 4/6/8 in sweep, and 6/8 in fair-budget pilot.
-    \item Optimizer: AdamW; default learning rate $10^{-4}$.
-    \item Default ROI target mode in current recipes: \texttt{maxpool}.
-\end{itemize}
-
-\subsection{Loss recipe defaults}
-\begin{table}[!htb]
-\caption{Recipe-level default settings}
-\label{tab:recipes}
-\centering
-\small
-\begin{tabular}{l l l}
-\toprule
-\textbf{Recipe} & \textbf{Rate mode} & \textbf{Importance mode} \\
-\midrule
-\texttt{legacy} & \texttt{global\_mean} & \texttt{bce} \\
-\texttt{balanced\_v1} & \texttt{normalized\_global} & \texttt{weighted\_bce} \\
-\texttt{balanced\_v2} & \texttt{normalized\_bg} & \texttt{weighted\_bce} \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\subsection{Teacher and head configurations}
-\begin{itemize}
-    \item ADS/MS-ADS teacher backend: \texttt{pointpillars\_zhulf}.
-    \item Teacher checkpoint: \texttt{data/checkpoints/pointpillars\_epoch\_160.pth}.
-    \item High-capacity ROI head: \texttt{pp\_lite} with 1,020,609 parameters.
-    \item Teacher adapter network size: 4,834,824 parameters.
-    \item Capacity ratio of \texttt{pp\_lite} to teacher: 21.1\%.
-\end{itemize}
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Results and Intermediate Findings}\label{sec:results}
-\subsection{Failure signal that drove loss redesign}
-Early experiments exposed a failure mode where importance predictions stayed near floor values, causing empty ROI prediction at threshold 0.5 in some runs. A representative notebook diagnosis reported:
-\begin{itemize}
-    \item $TP=0$, $FP=0$, $FN=70$ at threshold 0.5.
-    \item importance range close to floor (example: min 0.0100, max 0.0307, mean 0.0127).
-\end{itemize}
-This motivated replacing legacy objective terms with normalized rate loss and weighted ROI supervision.
-
-\subsection{150-epoch full sweeps with revised objectives}
-After recipe and head updates, 150-epoch runs were executed. Final losses are listed in Table~\ref{tab:full-150}.
+\subsection{Native-vs-Oracle Decomposition}
+To separate quantizer capability from importance quality, the same checkpoints were evaluated in native mode (predicted importance) and oracle mode (GT ROI injected into quantizer). Table~\ref{tab:oracle-decomp} summarizes the key result.
 
 \begin{table}[!htb]
-\caption{150-epoch run summary}
-\label{tab:full-150}
-\centering
-\small
-\begin{tabular}{l l l c}
-\toprule
-\textbf{Family} & \textbf{Run ID} & \textbf{Setting} & \textbf{Final loss} \\
-\midrule
-ARS & \texttt{260216\_resnet\_lr1e-4\_j21424\_r1} & ResNet, lr=$10^{-4}$ & 0.7224 \\
-ARS & \texttt{260216\_resnet\_lr5e-5\_j21421\_r3} & ResNet, lr=$5\cdot 10^{-5}$ & 0.7877 \\
-ARS & \texttt{260216\_darknet\_lr1e-4\_j21423\_r0} & DarkNet, lr=$10^{-4}$ & 1.6822 \\
-ARS & \texttt{260216\_darknet\_lr5e-5\_j21425\_r2} & DarkNet, lr=$5\cdot 10^{-5}$ & 1.7948 \\
-\midrule
-ADS & \texttt{260216\_darknet\_ld0.1\_j21422\_r2} & $\lambda_d=0.1$ & 2.1185 \\
-ADS & \texttt{260216\_darknet\_ld0.5\_j21426\_r0} & $\lambda_d=0.5$ & 2.7526 \\
-ADS & \texttt{260216\_darknet\_ld1.0\_j21427\_r1} & $\lambda_d=1.0$ & 3.1818 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-Main trend: in this setting, ADS distillation sweep favored $\lambda_d=0.1$ over larger values, and ARS with ResNet produced lower objective values than ARS with DarkNet.
-
-\subsection{Quick 16-frame analysis snapshot}
-Quick evaluation over 16 frames showed that fixed-threshold ROI selectivity remained unstable. Example summary values:
-\begin{itemize}
-    \item UB (ResNet q8): all-MSE 13.4235, ROI-MSE 24.8127.
-    \item ARS (ResNet): all-MSE 10.9570, ROI-MSE 19.8815.
-    \item ADS (DarkNet, $\lambda_d=0.1$): all-MSE 29.5963, ROI-MSE 86.1911.
-\end{itemize}
-These values are directly from \texttt{notebooks/quick\_eval\_summary\_16frames.csv}. Across several runs, large false-positive behavior and threshold sensitivity were observed.
-
-\subsection{Fair-budget pilot and oracle decomposition}
-To separate ``head quality'' from ``quantizer potential,'' a controlled pilot compared native predicted importance against oracle ROI importance (same checkpoints). Key 16-frame results:
-\begin{table}[!htb]
-\caption{Native vs oracle ROI pilot (16-frame subset)}
-\label{tab:oracle-pilot}
+\caption{Native vs oracle ROI decomposition on 16-frame pilot}
+\label{tab:oracle-decomp}
 \centering
 \small
 \begin{tabular}{l l c c}
 \toprule
-\textbf{Run} & \textbf{Mode} & \textbf{$bpp_{\text{entropy}}$} & \textbf{ROI-MSE} \\
+\textbf{Run} & \textbf{Mode} & \textbf{$bpp_{\mathrm{entropy}}$} & \textbf{ROI-MSE} \\
 \midrule
-UB ResNet q6 & native & 0.6668 & 228.0958 \\
-UB ResNet q8 & native & 0.9598 & 227.3080 \\
-ARS (adaptive) & native & 0.8064 & 227.8031 \\
-ARS (adaptive) & oracle ROI & 0.4177 & 227.8031 \\
-ADS (adaptive+distill) & native & 0.8687 & 227.6069 \\
-ADS (adaptive+distill) & oracle ROI & 0.4492 & 227.6073 \\
+ARS pilot & native & 0.8064 & 227.8031 \\
+ARS pilot & oracle ROI & 0.4177 & 227.8031 \\
+ADS pilot & native & 0.8687 & 227.6069 \\
+ADS pilot & oracle ROI & 0.4492 & 227.6073 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Interpretation: with ideal ROI signal (oracle mode), bitrate proxy drops strongly at almost unchanged ROI-MSE. This indicates the current bottleneck is primarily importance-map quality/calibration, not only quantizer formulation.
+The bitrate proxy nearly halves while ROI-MSE remains essentially unchanged, which supports the conclusion that current bottleneck is primarily importance-map quality/calibration rather than quantizer formulation itself.
 
-\subsection{MS-ADS ablation status}
-MS-ADS multi-scale head ablations are already implemented and running on both backbones:
-\begin{itemize}
-    \item ResNet array job: \texttt{21834}.
-    \item DarkNet array job: \texttt{21840}.
-    \item Head variants: \texttt{bifpn}, \texttt{deformable\_msa}, \texttt{dynamic}, \texttt{rangeformer}, \texttt{frnet}.
-\end{itemize}
-At the time of writing, these runs are still in progress, so final MS-ADS quantitative comparisons are deferred.
+\subsection{Preliminary Results (MS-ADS / Stage3 Equivalent)}
+MS-ADS runs are treated as preliminary in this thesis snapshot. In the available 150-epoch stage3-equivalent sweep, the best ResNet run was \texttt{dynamic} head (1.3593), while the best DarkNet run was also \texttt{dynamic} (2.1863). These values suggest that stronger heads can improve objective values relative to some ADS settings, but detector-facing validation and threshold calibration are still incomplete; therefore, no finalized claim is made for deployment advantage yet.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Discussion}\label{sec:discussion}
-\subsection{What improved}
-The transition from legacy objective to balanced recipes, combined with stronger ROI head capacity and real teacher wiring, removed several early reproducibility and training-instability issues. Logging and ledger automation also enabled consistent cross-run analysis.
+\section{Discussion and Limitations}\label{sec:discussion}
+The confirmed evidence supports three conclusions. First, objective redesign from legacy toward balanced recipes removed major collapse behavior and enabled stable long-horizon training. Second, distillation is useful but highly weight-sensitive, with over-strong distillation degrading the optimization outcome in the current setting. Third, native-vs-oracle decomposition indicates substantial remaining head/calibration headroom even when quantizer design is fixed.
 
-\subsection{What remains unresolved}
-Two issues remain central:
-\begin{itemize}
-    \item importance calibration instability across runs (threshold-sensitive behavior),
-    \item weak ROI selectivity at fixed threshold, often with high false positives.
-\end{itemize}
-Therefore, low final training loss alone cannot support deployment claims; detector-facing operating-point analysis is required.
+Two limitations remain central. The first is threshold calibration instability: fixed-threshold ROI quality can vary markedly across runs, so final training loss cannot be used as a stand-alone deployment criterion. The second is incomplete detector-facing validation for preliminary MS-ADS variants; objective-level improvement does not automatically imply downstream detection gains.
 
-\subsection{Planned visual analysis (next iteration)}
-This draft intentionally omits figures. The next writing iteration should add:
-\begin{itemize}
-    \item threshold sweep curves (precision/recall/IoU vs threshold) per stage,
-    \item native vs oracle bitrate-distortion plots at matched budget,
-    \item qualitative triples: input range/intensity, GT ROI, predicted importance/ROI.
-\end{itemize}
+Although this draft intentionally excludes figures, the next revision should prioritize three visual diagnostics: threshold-sweep precision/recall/IoU curves, matched-budget bitrate-distortion plots, and qualitative panels (input range/intensity, GT ROI, predicted importance, thresholded ROI).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Conclusion}\label{sec:conclusion}
-This thesis draft documents an implemented LiDAR compression pipeline organized as UB, ARS, ADS, and MS-ADS model families, with explicit code-faithful objectives and experiment settings. Intermediate and latest results show that adaptive quantization has clear potential under reliable ROI signals, but current performance is constrained by importance-map calibration and selectivity. Ongoing MS-ADS multi-scale head experiments are designed to directly address this bottleneck and complete detector-facing validation.
+\section{Conclusion and Next Steps}\label{sec:conclusion}
+This thesis establishes an end-to-end ROI-aware LiDAR range-image compression framework and a reproducible evidence trail from objective design to measured outcomes. Under the fixed February 20, 2026 snapshot, UB/ARS/ADS provide confirmed references, and MS-ADS provides preliminary evidence that richer heads are promising but not yet detector-validated.
+
+The main technical conclusion is that adaptive quantization already has strong potential, but practical benefit is constrained by importance-map calibration quality. The immediate next steps are detector-level operating-point calibration, complete Stage3 validation, and figure-backed analysis that links objective terms to observable ROI behavior under matched bitrate budgets.
