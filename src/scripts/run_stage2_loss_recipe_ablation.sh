@@ -71,6 +71,11 @@ DISTILL_LOGIT_LOSS=${DISTILL_LOGIT_LOSS:-auto}
 DISTILL_TEMP=${DISTILL_TEMP:-1.0}
 DISTILL_FEATURE_WEIGHT=${DISTILL_FEATURE_WEIGHT:-1.0}
 DISTILL_LOGIT_WEIGHT=${DISTILL_LOGIT_WEIGHT:-1.0}
+DISTILL_ALIGN_MODE=${DISTILL_ALIGN_MODE:-adaptive_pool}
+DISTILL_ALIGN_HW=${DISTILL_ALIGN_HW:-16,32}
+DISTILL_FEATURE_SOURCE=${DISTILL_FEATURE_SOURCE:-energy_map}
+DISTILL_TEACHER_SCORE_MIN=${DISTILL_TEACHER_SCORE_MIN:-0.0}
+DISTILL_TEACHER_SCORE_WEIGHT=${DISTILL_TEACHER_SCORE_WEIGHT:-1}
 
 if [[ ! -f "$TEACHER_PROXY_CKPT" ]]; then
   echo "Warning: teacher proxy checkpoint not found at $TEACHER_PROXY_CKPT"
@@ -117,6 +122,11 @@ echo "distill_logit_loss: ${DISTILL_LOGIT_LOSS}"
 echo "distill_temperature: ${DISTILL_TEMP}"
 echo "distill_feature_weight: ${DISTILL_FEATURE_WEIGHT}"
 echo "distill_logit_weight: ${DISTILL_LOGIT_WEIGHT}"
+echo "distill_align_mode: ${DISTILL_ALIGN_MODE}"
+echo "distill_align_hw: ${DISTILL_ALIGN_HW}"
+echo "distill_feature_source: ${DISTILL_FEATURE_SOURCE}"
+echo "distill_teacher_score_min: ${DISTILL_TEACHER_SCORE_MIN}"
+echo "distill_teacher_score_weight: ${DISTILL_TEACHER_SCORE_WEIGHT}"
 echo "importance_head_type: ${HEAD_TYPE}"
 echo "importance_hidden_channels: 32"
 echo "teacher_proxy_ckpt: ${TEACHER_PROXY_CKPT}"
@@ -127,6 +137,11 @@ echo "slurm_array_task_id: ${SLURM_ARRAY_TASK_ID:-n/a}"
 echo "python_env: ${PYTHON_ENV_DESC}"
 echo "started_at: $(date '+%Y-%m-%d %H:%M:%S %Z')"
 echo "============================================================"
+
+DISTILL_SCORE_FLAG=()
+if [[ "${DISTILL_TEACHER_SCORE_WEIGHT}" == "1" ]]; then
+  DISTILL_SCORE_FLAG+=(--distill_teacher_score_weight)
+fi
 
 "${PYTHON_RUNNER[@]}" src/main_train.py \
     --data_root "data/dataset/semantickitti/dataset/sequences" \
@@ -161,6 +176,11 @@ echo "============================================================"
     --distill_temperature "$DISTILL_TEMP" \
     --distill_feature_weight "$DISTILL_FEATURE_WEIGHT" \
     --distill_logit_weight "$DISTILL_LOGIT_WEIGHT" \
+    --distill_align_mode "$DISTILL_ALIGN_MODE" \
+    --distill_align_hw "$DISTILL_ALIGN_HW" \
+    --distill_feature_source "$DISTILL_FEATURE_SOURCE" \
+    --distill_teacher_score_min "$DISTILL_TEACHER_SCORE_MIN" \
+    "${DISTILL_SCORE_FLAG[@]}" \
     --importance_head_type "$HEAD_TYPE" \
     --importance_hidden_channels 32
 

@@ -218,6 +218,85 @@ Purpose: keep a date-ordered record of what was tested, why it was tested, what 
 - Use updated notebook outputs for communication, but avoid over-claiming ROI-aware gains until importance separation is fixed.
 - Next experiments should prioritize importance calibration/separation (targeting, weighting, and head supervision diagnostics) before new architecture complexity.
 
+---
+
+## 2026-02-24
+
+### What was done
+- Added KITTI 3D object download pipeline:
+  - `src/dataset/download_kitti3dobject.py`
+  - `src/scripts/download_kitti3dobject.sh`
+  - `src/scripts/download_kitti3dobject_sbatch.sh`
+- Started dataset download to:
+  - `data/dataset/kitti3dobject`
+  - resumed large archive (`data_object_image_2.zip.part`) in persistent `tmux` session `dl_kitti3dobject`.
+- Added KITTI range-image training loader with ROI mask generation from KITTI labels/calibration:
+  - `src/dataset/kitti_object_loader.py`
+- Updated training entrypoint to support dataset switching:
+  - `src/main_train.py`
+  - new args: `--dataset_type`, `--kitti_split`, `--kitti_imageset_file`, `--kitti_roi_classes`
+- Updated Stage scripts to support KITTI object training path (Stage0/1/2 + Stage2 distill-fix ablation):
+  - `src/scripts/run_uniform_baseline.sh`
+  - `src/scripts/run_stage1.sh`
+  - `src/scripts/run_stage2.sh`
+  - `src/scripts/run_stage2_distill_fix_ablation.sh`
+- Added PointPillar KITTI finetune workflow:
+  - `src/scripts/run_pointpillar_kitti_finetune.sh`
+  - `src/scripts/run_pointpillar_kitti_finetune_sbatch.sh`
+  - auto summary outputs:
+    - `notebooks/pointpillar_finetune_kitti_summary.csv`
+    - `docs/report/pointpillar_finetune_kitti.md`
+
+### Why
+- Track-B claims require detector-level protocol sanity first, then same-protocol reconstructed comparison.
+- Existing Stage scripts were hard-coded to SemanticKITTI; ROI-aware compression study needed KITTI-compatible training/eval path.
+- A reproducible PointPillar finetune record is needed for thesis/paper audit trail.
+
+### Key observations
+- KITTI eval subset in repo (`kitti_eval_subset`) is only 128 frames and has train/val/test overlap; not suitable for full protocol claims.
+- First finetune submit (`sbatch job 22250`) failed immediately because `data/dataset/kitti3dobject` download/extraction was incomplete (`ImageSets` missing at runtime).
+- KITTI loader smoke test on subset succeeded:
+  - output tensors matched expected shapes `[5,64,1024]`, mask `[64,1024]`, roi `[1,64,1024]`.
+
+### 2026-02-24 Late update
+
+#### What was done
+- Hardened KITTI finetune sbatch flow:
+  - `src/scripts/run_pointpillar_kitti_finetune.sh` now supports dataset-ready wait (`WAIT_FOR_KITTI_SEC`, `WAIT_POLL_SEC`).
+  - `src/scripts/run_pointpillar_kitti_finetune_sbatch.sh` exports wait defaults and prints them in metadata.
+- Re-submitted PointPillar finetune as scheduled job:
+  - `sbatch job 22253` (`BeginTime` start) with:
+    - `KITTI_ROOT_OFFICIAL=/home/018219422/lidar_pointcloud_compression/data/dataset/kitti3dobject`
+    - `EPOCHS=40`, `BATCH_SIZE=4`, `WORKERS=4`, `REBUILD_KITTI_INFOS=1`, `RUN_FINAL_TEST=1`.
+- Validated Stage1 KITTI path end-to-end with smoke run:
+  - command used `DATASET_TYPE=kitti3dobject`, `DATA_ROOT=data/dataset/kitti_eval_subset`, `EPOCHS=1`, `MAX_TRAIN_FRAMES=2`.
+  - fixed loader robustness bug for nonstandard point file layout:
+    - `src/dataset/kitti_object_loader.py` now accepts both `Nx4` and `Nx3` float32 point bins.
+
+#### Key observations
+- The full KITTI object archive download remains in progress in `tmux` session `dl_kitti3dobject`.
+- `run_stage1.sh` KITTI mode now executes a complete train epoch after loader fix (no crash on subset bins).
+- First immediate finetune job (`22251`) was canceled to avoid idle GPU waiting; resubmitted as delayed start (`22253`).
+
+### 2026-02-24 Night update
+
+#### What was done
+- Added teacher-design survey note to clarify distillation strategy boundaries:
+  - `docs/report/teacher_distill_design_survey_20260224.md`
+
+#### Key observations
+- Direct PointPillar -> range-image pixel distillation remains modality-mismatched.
+- Recommended immediate policy:
+  - keep PointPillar for Track-B endpoint AP sanity/comparison,
+  - use aligned teacher space (range-view teacher or assistant bridge) for feature distillation.
+
+### Decisions
+- Keep long-running KITTI object download active and resumable.
+- Re-run PointPillar finetune sbatch after downloader finishes and layout validation passes.
+- Keep Track-B reporting strict:
+  - original non-zero AP sanity first,
+  - then reconstructed-vs-original comparison under identical protocol.
+
 ### Sources
 - `notebooks/stage1_stage2_experiment_analysis.ipynb`
 - `notebooks/stage1_stage2_experiment_analysis.executed.ipynb`
@@ -550,3 +629,247 @@ Purpose: keep a date-ordered record of what was tested, why it was tested, what 
 - `notebooks/oracle_eval_summary_260219_resnet_pilot_s1adapt.csv`
 - `notebooks/oracle_eval_summary_260219_resnet_pilot_s2distill.csv`
 - `notebooks/matched_bitrate_pairs_260219_pilot.csv`
+
+## 2026-02-24: Dual-Track Evaluation Recovery (SemanticKITTI ROI + KITTI 3D mAP)
+
+### Problem
+- We had a claim-boundary mismatch:
+  - semantic point labels were used for ROI supervision and proxy diagnostics,
+  - but final detector-level claim requires official 3D box AP endpoint.
+- Mixing these in one table made interpretation weak.
+
+### Decision
+- Lock a dual-track protocol:
+  - Track-A: SemanticKITTI codec/ROI diagnostics.
+  - Track-B: KITTI + OpenPCDet official detector endpoint.
+- Keep teacher policy as freeze-first with a quality gate:
+  - if `ap3d_car_mod` on original clouds is below threshold, prepare fine-tune branch.
+
+### Implementation Added
+- `src/utils/recon_pointcloud_export.py`
+  - standardized reconstruction export (`[range,intensity,x,y,z] -> XYZI .bin`) with fixed validity rule.
+- `src/train/evaluate_kitti_map_vs_rate.py`
+  - evaluates original vs reconstructed clouds under OpenPCDet and merges AP with bitrate metrics.
+- `src/scripts/run_kitti_map_vs_rate.sh`
+  - one-command wrapper for detector endpoint evaluation and pair matching.
+- `src/utils/match_bitrate_budget_detector.py`
+  - bitrate matching for detector rows with fairness tagging (`exact/nearest`, `fair/low-fairness`).
+- `src/scripts/run_teacher_finetune_kitti.sh`
+  - optional teacher fine-tune branch guarded by AP threshold.
+
+### Documentation Update
+- `docs/report/paper_fair_comparison_table.md`
+  - now explicitly separates Table-A (SemanticKITTI) and Table-B (KITTI detector endpoint).
+  - preserves native/oracle definitions and adds auto-update marker block for Table-B.
+
+### Notes
+- This round focused on infra + eval spec; no large retraining was included.
+- OpenPCDet availability is now a strict runtime requirement for Track-B execution.
+
+## 2026-02-24 (Update): Stage2 Distillation Fix Hypothesis Implementation
+
+### Problem statement
+- Stage2 weak learning was linked to two concrete factors:
+  - teacher/task mismatch between detector objective space and semantic supervision space,
+  - resize-only map alignment in distillation across heterogeneous feature resolutions.
+
+### Implemented fix knobs
+- Distill alignment:
+  - `distill_align_mode`: `resize` (legacy) vs `adaptive_pool` (new recommended path).
+  - `distill_align_hw`: pooled target grid (e.g., `16,32`).
+- Distill feature source:
+  - `channel_mean` (legacy),
+  - `energy_map` (channel-agnostic spatial response),
+  - `none` (feature-distill off ablation).
+- Distill teacher quality gate:
+  - `distill_teacher_score_min`
+  - `distill_teacher_score_weight` (enable sample-wise gating)
+
+### Runnable experiments
+- Local pilot:
+  - `src/scripts/run_stage2_distill_fix_pilot_local.sh`
+- Slurm array:
+  - `src/scripts/run_stage2_distill_fix_ablation.sh`
+  - cases:
+    - `legacy_mean_resize`
+    - `energy_pool_16x32`
+    - `energy_pool_16x32_scoregate015`
+
+### Code paths updated
+- `src/loss/distill_loss.py`
+- `src/train/trainer.py`
+- `src/main_train.py`
+- `src/scripts/run_stage2.sh`
+- `src/scripts/run_stage2_loss_recipe_ablation.sh`
+- `src/scripts/run_stage2_loss_recipe_pilot_local.sh`
+
+## 2026-02-24 (Update): Stage2 Distill-Fix Pilot Smoke Run
+
+### What was run
+- Script:
+  - `src/scripts/run_stage2_distill_fix_pilot_local.sh`
+- Runtime overrides:
+  - `EPOCHS=1`
+  - `MAX_TRAIN_FRAMES=8`
+  - `BATCH_SIZE=1`
+  - `NUM_WORKERS=0`
+  - `BACKBONE=resnet`
+
+### Why
+- Verify end-to-end runnability of new distillation controls before large GPU sweeps.
+- Confirm that all three ablation cases are executable with current defaults/checkpoints.
+
+### Outcome
+- Script completed all cases without runtime failure.
+- Case logs:
+  - `logs/260223_resnet_pilot_legacy_mean_resize_r0.out`
+  - `logs/260223_resnet_pilot_energy_pool_16x32_r1.out`
+  - `logs/260223_resnet_pilot_energy_pool_16x32_scoregate015_r2.out`
+- Epoch-0 snapshots:
+  - `legacy_mean_resize`: loss `81.9734`, `imp_mean=0.4957`
+  - `energy_pool_16x32`: loss `80.1464`, `imp_mean=0.5423`
+  - `energy_pool_16x32_scoregate015`: loss `80.8066`, `imp_mean=0.5655`
+
+### Follow-up
+- Move to Slurm full-length ablation (`epochs=150`) using:
+  - `src/scripts/run_stage2_distill_fix_ablation.sh`
+- After completion, regenerate ledger:
+  - `python src/utils/update_experiments_result.py`
+
+## 2026-02-24 (Update): KITTI 3D BBox Endpoint Run Completed
+
+### What was run
+- Slurm job:
+  - `22123`
+- Script:
+  - `src/scripts/run_kitti_map_vs_rate.sh`
+- Inputs:
+  - KITTI-format subset root: `data/dataset/kitti_eval_subset`
+  - detector cfg: `third_party/OpenPCDet/tools/cfgs/kitti_models/pointpillar.yaml`
+  - detector ckpt: `data/checkpoints/openpcdet_pointpillar_18M.pth`
+  - compression runs:
+    - `Uniform Baseline (ResNet)`
+    - `Adaptive ROI Student (ResNet)`
+    - `Adaptive Distilled Student (ResNet)`
+
+### Output artifacts
+- `notebooks/kitti_map_vs_rate_summary.csv`
+- `notebooks/kitti_map_vs_rate_detail.csv`
+- `notebooks/kitti_map_vs_rate_pairs.csv`
+- `docs/report/paper_fair_comparison_table.md` (Table-B refreshed)
+
+### Observed outcome
+- Track-B path executed end-to-end without crash.
+- AP3D values were all `0.0` for both `original` and `reconstructed` clouds in this run.
+- Teacher quality gate warning was triggered:
+  - `teacher_ap3d_mod_car=0.0 < 55.0`.
+
+### Interpretation
+- Infrastructure status: connected and reproducible.
+- Scientific status: detector-endpoint claim is not yet valid.
+- Immediate priority:
+  - fix protocol/domain alignment for detector endpoint before using Stage2 distillation claims (canonical KITTI val protocol and/or detector fine-tuning).
+
+## 2026-02-24 (Update): Multi-Epoch Sweep for Two Updated Stage2 Fixes
+
+### Requested run scope
+- Two updated experiments:
+  - `energy_pool_16x32`
+  - `energy_pool_16x32_scoregate015`
+- Multi-parameter sweep:
+  - `lr in {1e-4, 5e-5}`
+  - `lambda_distill in {0.05, 0.1, 0.2}`
+- Epochs:
+  - `80`
+
+### Execution
+- Submitted array:
+  - train job `22127` (12 tasks total)
+- Auto post-processing:
+  - job `22140` (`afterany:22127`)
+  - updates ledger + emits dedicated summary files.
+
+### Output paths (post job)
+- `src/results/experiments_result.csv`
+- `src/results/experiments_result.md`
+- `notebooks/stage2_distill_fix_twoexp_summary_22127.csv`
+- `docs/report/stage2_distill_fix_twoexp_summary_22127.md`
+
+### Result snapshot
+- Total runs: `12` (`2 cases x 2 lrs x 3 lambda_distill`)
+- Best non-score-gate case:
+  - `energy_pool_16x32`, `lr=1e-4`, `lambda_distill=0.05`
+  - `best_loss=1.1291`, `final_imp_mean=0.1432`
+- Best score-gate case:
+  - `energy_pool_16x32_scoregate015`, `lr=1e-4`, `lambda_distill=0.2`
+  - `best_loss=0.8168`, `final_imp_mean=0.1472`
+- Interpretation:
+  - score-gating improved convergence and importance activation stability in this sweep.
+  - high distill weight without gating still hurts (`lambda_distill=0.2` was worst in non-gated branch).
+
+## 2026-02-25/27 (Update): Stage0/Stage1 Detector Gap RCA on KITTI
+
+### What was done
+- Re-executed focused visualization with selected high-ROI KITTI frame:
+  - `notebooks/stage0_stage1_kitti_pointpillar_visualization.executed.ipynb`
+  - selected sample: `003464`, ROI ratio `0.0856`.
+- Ran detector debug comparing four inputs on the same sample:
+  - raw point cloud
+  - identity projection/unprojection (no codec)
+  - Stage0 reconstructed cloud
+  - Stage1 reconstructed cloud
+  - log: `logs/slurm_22383.out`
+- Measured representation loss from projection alone on val split (`200` frames):
+  - command path used `src/utils/recon_pointcloud_export.py::project_points_to_range_image`.
+
+### Why
+- There was a contradiction:
+  - Stage0/Stage1 training losses kept decreasing,
+  - but reconstructed detector behavior stayed weak.
+- Needed to separate three hypotheses:
+  - insufficient epochs,
+  - importance-head capacity issue,
+  - geometric information loss before/around codec path.
+
+### Key observations
+- Training status (not a crash/divergence):
+  - Stage0 (`j22255_r5`): `21.3739 -> 1.5752` over `50` epochs.
+  - Stage1 (`j22279_r1`): `21.7544 -> 1.7810` over `50` epochs.
+  - both trained on `dataset_type=kitti3dobject`, `3712` train frames.
+- Projection-only loss is large before codec learning:
+  - mean point-retention after projection: `0.4169` (200 val frames).
+  - mean raw points/frame: `119,502.2`
+  - mean occupied range pixels/frame: `49,812.1`
+  - collision factor (`raw/occupied`): `2.399`.
+- One-sample detector comparison (`sample 003464`):
+  - raw points: `123,592`, raw preds: `44`
+  - identity points: `50,911`, identity preds: `27`
+  - Stage0 recon points: `50,767`, preds: `1`
+  - Stage1 recon points: `50,635`, preds: `0`
+- Visualization endpoint confirmation:
+  - GT boxes: `15`
+  - raw prediction boxes (`score>=0.30`): `14`
+  - Stage0/Stage1 recon both: `0` boxes on the selected frame.
+
+### Diagnosis
+- First-order bottleneck is representation loss in the current `raw -> fixed 64x1024 range -> points` path:
+  - single-return per pixel on collisions causes heavy irreversible sparsification.
+- Second-order bottleneck is objective mismatch:
+  - model optimizes reconstruction/rate/importance losses, not detector AP directly.
+- Epoch/head are currently lower-priority explanations:
+  - Stage0 (no importance supervision) shows similar endpoint degradation trend.
+  - Stage1 with `pp_lite(64)` still collapses detector endpoint on reconstruction in this check.
+
+### Decisions
+- Make `raw vs identity(project->unproject) vs reconstructed` mandatory in Track-B diagnostics to deconfound projection-loss vs codec-loss.
+- Keep detector claim gate strict:
+  - original KITTI AP must be non-zero under fixed official protocol before reconstructed comparisons are used as claims.
+- Prioritize representation-preserving reconstruction experiments next (multi-return or improved point restoration policy), then rerun Stage0/Stage1/Stage2 endpoint comparison.
+
+### Sources
+- `docs/report/experiments.md`
+- `logs/260224_resnet_uniform_q8_j22255_r5.out`
+- `logs/260224_resnet_lr1e-4_j22279_r1.out`
+- `logs/slurm_22383.out`
+- `notebooks/stage0_stage1_kitti_pointpillar_visualization.executed.ipynb`
+- `src/utils/recon_pointcloud_export.py`

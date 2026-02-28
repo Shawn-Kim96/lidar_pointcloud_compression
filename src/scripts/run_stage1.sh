@@ -34,6 +34,20 @@ EPOCHS=${EPOCHS:-50}
 BATCH_SIZE=${BATCH_SIZE:-4}
 NUM_WORKERS=${NUM_WORKERS:-4}
 MAX_TRAIN_FRAMES=${MAX_TRAIN_FRAMES:-0}
+DATASET_TYPE=${DATASET_TYPE:-kitti3dobject}
+if [[ "${DATASET_TYPE}" == "kitti3dobject" ]]; then
+  DATA_ROOT=${DATA_ROOT:-data/dataset/kitti3dobject}
+  KITTI_SPLIT=${KITTI_SPLIT:-train}
+  KITTI_IMAGESET_FILE=${KITTI_IMAGESET_FILE:-}
+  KITTI_ROI_CLASSES=${KITTI_ROI_CLASSES:-Car,Pedestrian,Cyclist}
+  WAIT_FOR_KITTI_SEC=${WAIT_FOR_KITTI_SEC:-0}
+  WAIT_POLL_SEC=${WAIT_POLL_SEC:-60}
+else
+  DATA_ROOT=${DATA_ROOT:-data/dataset/semantickitti/dataset/sequences}
+  KITTI_SPLIT=${KITTI_SPLIT:-train}
+  KITTI_IMAGESET_FILE=${KITTI_IMAGESET_FILE:-}
+  KITTI_ROI_CLASSES=${KITTI_ROI_CLASSES:-Car,Pedestrian,Cyclist}
+fi
 ROI_LEVELS=${ROI_LEVELS:-256}
 BG_LEVELS=${BG_LEVELS:-16}
 ROI_TARGET_MODE=${ROI_TARGET_MODE:-maxpool}
@@ -82,7 +96,13 @@ echo "backbone: ${BACKBONE}"
 echo "teacher_backend: none"
 echo "run_id: ${RUN_ID}"
 echo "save_dir: ${SAVE_DIR}"
-echo "dataset_root: data/dataset/semantickitti/dataset/sequences"
+echo "dataset_root: ${DATA_ROOT}"
+echo "dataset_type: ${DATASET_TYPE}"
+if [[ "${DATASET_TYPE}" == "kitti3dobject" ]]; then
+echo "kitti_split: ${KITTI_SPLIT}"
+echo "kitti_imageset_file: ${KITTI_IMAGESET_FILE:-auto(ImageSets/<split>.txt)}"
+echo "kitti_roi_classes: ${KITTI_ROI_CLASSES}"
+fi
 echo "epochs: ${EPOCHS}"
 echo "batch_size: ${BATCH_SIZE}"
 echo "num_workers: ${NUM_WORKERS}"
@@ -114,42 +134,78 @@ echo "python_env: ${PYTHON_ENV_DESC}"
 echo "started_at: $(date '+%Y-%m-%d %H:%M:%S %Z')"
 echo "============================================================"
 
+if [[ "${DATASET_TYPE}" == "kitti3dobject" && "${WAIT_FOR_KITTI_SEC}" -gt 0 ]]; then
+    KITTI_REQUIRED=("ImageSets" "training/velodyne" "training/label_2" "training/calib")
+    deadline=$(( $(date +%s) + WAIT_FOR_KITTI_SEC ))
+    while true; do
+        ready=1
+        for rel in "${KITTI_REQUIRED[@]}"; do
+            if [[ ! -d "${DATA_ROOT}/${rel}" ]]; then
+                ready=0
+                break
+            fi
+        done
+        if [[ "${ready}" == "1" && -f "${DATA_ROOT}/ImageSets/train.txt" ]]; then
+            bin_count=$(find "${DATA_ROOT}/training/velodyne" -maxdepth 1 -name '*.bin' | wc -l | tr -d '[:space:]')
+            if [[ "${bin_count}" -ge 1000 ]]; then
+                break
+            fi
+        fi
+        now=$(date +%s)
+        if [[ "${now}" -ge "${deadline}" ]]; then
+            echo "Error: KITTI dataset not ready within WAIT_FOR_KITTI_SEC=${WAIT_FOR_KITTI_SEC}" >&2
+            exit 1
+        fi
+        echo "[stage1] waiting for KITTI extraction ... (bin_count=${bin_count:-0})"
+        sleep "${WAIT_POLL_SEC}"
+    done
+fi
+
 # Run Training
 # --no_teacher ensures this is Stage 1 (Backbone Only)
 # --roi_levels / --bg_levels set the quantization granularity
-"${PYTHON_RUNNER[@]}" src/main_train.py \
-    --data_root "data/dataset/semantickitti/dataset/sequences" \
-    --backbone "$BACKBONE" \
-    --lr "$LR" \
-    --epochs "$EPOCHS" \
-    --batch_size "$BATCH_SIZE" \
-    --num_workers "$NUM_WORKERS" \
-    --max_train_frames "$MAX_TRAIN_FRAMES" \
-    --no_teacher \
-    --run_id "$RUN_ID" \
-    --save_dir "$SAVE_DIR" \
-    --quantizer_mode "$QUANTIZER_MODE" \
-    --quant_bits "$QUANT_BITS" \
-    --roi_levels "$ROI_LEVELS" \
-    --bg_levels "$BG_LEVELS" \
-    --roi_target_mode "$ROI_TARGET_MODE" \
-    --loss_recipe "$LOSS_RECIPE" \
-    --rate_loss_mode "$RATE_LOSS_MODE" \
-    --importance_loss_mode "$IMPORTANCE_LOSS_MODE" \
-    --importance_pos_weight_mode "$IMPORTANCE_POS_WEIGHT_MODE" \
-    --importance_pos_weight "$IMPORTANCE_POS_WEIGHT" \
-    --importance_pos_weight_max "$IMPORTANCE_POS_WEIGHT_MAX" \
-    --lambda_recon "$L_RECON" \
-    --lambda_rate "$L_RATE" \
-    --lambda_distill "$L_DISTILL" \
-    --lambda_importance "$L_IMPORTANCE" \
-    --lambda_imp_separation "$L_IMP_SEPARATION" \
-    --imp_separation_margin "$IMP_SEPARATION_MARGIN" \
-    --distill_logit_loss "$DISTILL_LOGIT_LOSS" \
-    --distill_temperature "$DISTILL_TEMPERATURE" \
-    --distill_feature_weight "$DISTILL_FEATURE_WEIGHT" \
-    --distill_logit_weight "$DISTILL_LOGIT_WEIGHT" \
-    --importance_head_type "$IMPORTANCE_HEAD_TYPE" \
+TRAIN_CMD=(
+    "${PYTHON_RUNNER[@]}" src/main_train.py
+    --data_root "${DATA_ROOT}"
+    --dataset_type "${DATASET_TYPE}"
+    --kitti_split "${KITTI_SPLIT}"
+    --kitti_roi_classes "${KITTI_ROI_CLASSES}"
+    --backbone "$BACKBONE"
+    --lr "$LR"
+    --epochs "$EPOCHS"
+    --batch_size "$BATCH_SIZE"
+    --num_workers "$NUM_WORKERS"
+    --max_train_frames "$MAX_TRAIN_FRAMES"
+    --no_teacher
+    --run_id "$RUN_ID"
+    --save_dir "$SAVE_DIR"
+    --quantizer_mode "$QUANTIZER_MODE"
+    --quant_bits "$QUANT_BITS"
+    --roi_levels "$ROI_LEVELS"
+    --bg_levels "$BG_LEVELS"
+    --roi_target_mode "$ROI_TARGET_MODE"
+    --loss_recipe "$LOSS_RECIPE"
+    --rate_loss_mode "$RATE_LOSS_MODE"
+    --importance_loss_mode "$IMPORTANCE_LOSS_MODE"
+    --importance_pos_weight_mode "$IMPORTANCE_POS_WEIGHT_MODE"
+    --importance_pos_weight "$IMPORTANCE_POS_WEIGHT"
+    --importance_pos_weight_max "$IMPORTANCE_POS_WEIGHT_MAX"
+    --lambda_recon "$L_RECON"
+    --lambda_rate "$L_RATE"
+    --lambda_distill "$L_DISTILL"
+    --lambda_importance "$L_IMPORTANCE"
+    --lambda_imp_separation "$L_IMP_SEPARATION"
+    --imp_separation_margin "$IMP_SEPARATION_MARGIN"
+    --distill_logit_loss "$DISTILL_LOGIT_LOSS"
+    --distill_temperature "$DISTILL_TEMPERATURE"
+    --distill_feature_weight "$DISTILL_FEATURE_WEIGHT"
+    --distill_logit_weight "$DISTILL_LOGIT_WEIGHT"
+    --importance_head_type "$IMPORTANCE_HEAD_TYPE"
     --importance_hidden_channels "$IMPORTANCE_HIDDEN_CHANNELS"
+)
+if [[ -n "${KITTI_IMAGESET_FILE}" ]]; then
+    TRAIN_CMD+=(--kitti_imageset_file "${KITTI_IMAGESET_FILE}")
+fi
+"${TRAIN_CMD[@]}"
 
 echo "Done Experiment $SLURM_ARRAY_TASK_ID"

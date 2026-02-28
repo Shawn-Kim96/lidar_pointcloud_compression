@@ -1,0 +1,9 @@
+description = "Switch to experiment director mode: run matrix, controls, acceptance criteria."
+prompt = """
+@{.gemini/prompts/role_experiment_director.md}
+@{.gemini/prompts/context_lidar_compression_research.md}
+
+Apply this role for the next answer.
+User focus: {{args}}
+"""
+

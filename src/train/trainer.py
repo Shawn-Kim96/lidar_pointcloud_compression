@@ -88,7 +88,14 @@ class Trainer:
             logit_weight=float(loss_cfg.get("distill_logit_weight", 1.0)),
             temperature=float(loss_cfg.get("distill_temperature", 1.0)),
             logit_loss_type=str(loss_cfg.get("distill_logit_loss", "auto")),
+            align_mode=str(loss_cfg.get("distill_align_mode", "resize")),
+            align_hw=loss_cfg.get("distill_align_hw", None),
         )
+        self.distill_feature_source = str(loss_cfg.get("distill_feature_source", "channel_mean")).lower()
+        if self.distill_feature_source not in ("channel_mean", "energy_map", "none"):
+            raise ValueError("distill_feature_source must be one of: channel_mean, energy_map, none")
+        self.distill_teacher_score_min = float(loss_cfg.get("distill_teacher_score_min", 0.0))
+        self.distill_teacher_score_weight = bool(loss_cfg.get("distill_teacher_score_weight", True))
 
         quantizer_cfg = config.get("model", {}).get("quantizer_config", {})
         self.quantizer_mode = str(quantizer_cfg.get("mode", "adaptive")).lower()
@@ -104,6 +111,16 @@ class Trainer:
                 f"Unsupported roi_target_mode '{self.roi_target_mode}'. "
                 "Use one of: nearest, maxpool, area"
             )
+
+    def _feature_distill_map(self, feat: torch.Tensor):
+        if feat is None:
+            return None
+        if self.distill_feature_source == "none":
+            return None
+        if self.distill_feature_source == "channel_mean":
+            return feat.mean(dim=1, keepdim=True)
+        # energy_map: channel-agnostic spatial response for cross-architecture matching.
+        return torch.sqrt((feat ** 2).mean(dim=1, keepdim=True) + 1e-8)
 
     def _build_roi_target(self, roi_mask: torch.Tensor, target_hw):
         if roi_mask is None:
@@ -290,9 +307,9 @@ class Trainer:
                 student_features = None
                 teacher_features = None
                 if "latent" in aux and "features" in teacher_out:
-                    # Channel-mismatch-safe feature distillation using channel-averaged maps.
-                    student_features = aux["latent"].mean(dim=1, keepdim=True)
-                    teacher_features = teacher_out["features"].detach().mean(dim=1, keepdim=True)
+                    # Feature distillation map can be channel-mean (legacy) or energy-map (recommended).
+                    student_features = self._feature_distill_map(aux["latent"])
+                    teacher_features = self._feature_distill_map(teacher_out["features"].detach())
 
                 student_logits = aux.get("importance_logits", None)
                 teacher_logits = teacher_out.get("logits", None)
@@ -303,6 +320,26 @@ class Trainer:
                     distill_weight = roi_target
                     if distill_weight is None and "importance_map" in teacher_out:
                         distill_weight = teacher_out["importance_map"].detach()
+
+                    if (
+                        self.distill_teacher_score_weight
+                        and "score" in teacher_out
+                        and self.distill_teacher_score_min > 0.0
+                    ):
+                        # Suppress distillation on low-confidence teacher samples.
+                        score = teacher_out["score"].detach().view(-1, 1, 1, 1).to(self.device)
+                        sample_gate = (score >= self.distill_teacher_score_min).float()
+                        if distill_weight is None:
+                            ref = student_logits if student_logits is not None else student_features
+                            if ref is not None:
+                                distill_weight = torch.ones(
+                                    (ref.shape[0], 1, ref.shape[-2], ref.shape[-1]),
+                                    device=ref.device,
+                                )
+                        if distill_weight is not None:
+                            if distill_weight.dim() == 3:
+                                distill_weight = distill_weight.unsqueeze(1)
+                            distill_weight = distill_weight * sample_gate
 
                     loss_distill, _ = self.criterion_distill(
                         student_features=student_features,

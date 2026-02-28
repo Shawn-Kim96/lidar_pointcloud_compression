@@ -1,6 +1,9 @@
 #!/bin/bash
-# Local pilot run (CPU/GPU auto) for quick verification of new loss recipes.
-# This is intentionally short and uses subset training.
+# Local quick pilot for Stage2 distill-fix ablation.
+# Runs 3 short cases:
+# - legacy_mean_resize
+# - energy_pool_16x32
+# - energy_pool_16x32_scoregate015
 
 set -euo pipefail
 
@@ -16,48 +19,45 @@ else
 fi
 
 DATE_TAG=$(date +%y%m%d)
-JOB_TAG="localpilot"
-
-LOSS_RECIPES=("balanced_v1" "balanced_v2")
-RATE_MODES=("normalized_global" "normalized_bg")
-HEAD_TYPES=("basic" "multiscale")
-LAMBDA_IMP_SEPS=(0.0 0.2)
-
 BACKBONE=${BACKBONE:-resnet}
 TEACHER_BACKEND=${TEACHER_BACKEND:-pointpillars_zhulf}
 TEACHER_PROXY_CKPT=${TEACHER_PROXY_CKPT:-data/checkpoints/pointpillars_epoch_160.pth}
-EPOCHS=${EPOCHS:-2}
+EPOCHS=${EPOCHS:-3}
 BATCH_SIZE=${BATCH_SIZE:-2}
 NUM_WORKERS=${NUM_WORKERS:-0}
-LR=${LR:-1e-4}
 MAX_TRAIN_FRAMES=${MAX_TRAIN_FRAMES:-128}
-DISTILL_ALIGN_MODE=${DISTILL_ALIGN_MODE:-adaptive_pool}
-DISTILL_ALIGN_HW=${DISTILL_ALIGN_HW:-16,32}
-DISTILL_FEATURE_SOURCE=${DISTILL_FEATURE_SOURCE:-energy_map}
-DISTILL_TEACHER_SCORE_MIN=${DISTILL_TEACHER_SCORE_MIN:-0.0}
-DISTILL_TEACHER_SCORE_WEIGHT=${DISTILL_TEACHER_SCORE_WEIGHT:-1}
+LR=${LR:-1e-4}
 
-for i in 0 1; do
-  LOSS_RECIPE=${LOSS_RECIPES[$i]}
-  RATE_MODE=${RATE_MODES[$i]}
-  HEAD_TYPE=${HEAD_TYPES[$i]}
-  L_IMP_SEP=${LAMBDA_IMP_SEPS[$i]}
+CASE_TAGS=("legacy_mean_resize" "energy_pool_16x32" "energy_pool_16x32_scoregate015")
+DISTILL_FEATURE_SOURCES=("channel_mean" "energy_map" "energy_map")
+DISTILL_ALIGN_MODES=("resize" "adaptive_pool" "adaptive_pool")
+DISTILL_ALIGN_HWS=("0,0" "16,32" "16,32")
+DISTILL_TEACHER_SCORE_MINS=("0.0" "0.0" "0.15")
+DISTILL_TEACHER_SCORE_WEIGHTS=("0" "1" "1")
 
-  RUN_ID="${JOB_TAG}_r${i}"
-  SAVE_DIR="data/results/experiments/${DATE_TAG}_${BACKBONE}_pilot_${LOSS_RECIPE}_head${HEAD_TYPE}_lr${LR}_bs${BATCH_SIZE}_${RUN_ID}"
-  LOG_PREFIX="${DATE_TAG}_${BACKBONE}_pilot_${LOSS_RECIPE}_head${HEAD_TYPE}_r${i}"
+for i in 0 1 2; do
+  CASE_TAG=${CASE_TAGS[$i]}
+  DISTILL_FEATURE_SOURCE=${DISTILL_FEATURE_SOURCES[$i]}
+  DISTILL_ALIGN_MODE=${DISTILL_ALIGN_MODES[$i]}
+  DISTILL_ALIGN_HW=${DISTILL_ALIGN_HWS[$i]}
+  DISTILL_TEACHER_SCORE_MIN=${DISTILL_TEACHER_SCORE_MINS[$i]}
+  DISTILL_TEACHER_SCORE_WEIGHT=${DISTILL_TEACHER_SCORE_WEIGHTS[$i]}
 
-  echo "============================================================"
-  echo "[Pilot Metadata]"
-  echo "run: ${RUN_ID}"
-  echo "python_env: ${PYTHON_ENV_DESC}"
-  echo "save_dir: ${SAVE_DIR}"
-  echo "============================================================"
+  RUN_ID="local_s2fix_r${i}"
+  SAVE_DIR="data/results/experiments/${DATE_TAG}_${BACKBONE}_pilot_${CASE_TAG}_lr${LR}_bs${BATCH_SIZE}_${RUN_ID}"
+  LOG_PREFIX="${DATE_TAG}_${BACKBONE}_pilot_${CASE_TAG}_r${i}"
 
   DISTILL_SCORE_FLAG=()
   if [[ "${DISTILL_TEACHER_SCORE_WEIGHT}" == "1" ]]; then
     DISTILL_SCORE_FLAG+=(--distill_teacher_score_weight)
   fi
+
+  echo "============================================================"
+  echo "[Stage2 Distill-Fix Pilot]"
+  echo "case: ${CASE_TAG}"
+  echo "save_dir: ${SAVE_DIR}"
+  echo "python_env: ${PYTHON_ENV_DESC}"
+  echo "============================================================"
 
   "${PYTHON_RUNNER[@]}" src/main_train.py \
     --data_root "data/dataset/semantickitti/dataset/sequences" \
@@ -66,41 +66,40 @@ for i in 0 1; do
     --epochs "$EPOCHS" \
     --batch_size "$BATCH_SIZE" \
     --num_workers "$NUM_WORKERS" \
+    --max_train_frames "$MAX_TRAIN_FRAMES" \
     --teacher_backend "$TEACHER_BACKEND" \
     --teacher_proxy_ckpt "$TEACHER_PROXY_CKPT" \
     --run_id "$RUN_ID" \
     --save_dir "$SAVE_DIR" \
-    --quantizer_mode "adaptive" \
+    --quantizer_mode adaptive \
     --quant_bits 8 \
     --roi_levels 256 \
     --bg_levels 16 \
-    --roi_target_mode "maxpool" \
-    --max_train_frames "$MAX_TRAIN_FRAMES" \
-    --loss_recipe "$LOSS_RECIPE" \
-    --rate_loss_mode "$RATE_MODE" \
-    --importance_loss_mode "weighted_bce" \
-    --importance_pos_weight_mode "auto" \
+    --roi_target_mode maxpool \
+    --loss_recipe balanced_v2 \
+    --rate_loss_mode normalized_bg \
+    --importance_loss_mode weighted_bce \
+    --importance_pos_weight_mode auto \
     --importance_pos_weight 1.0 \
     --importance_pos_weight_max 50.0 \
     --lambda_recon 1.0 \
     --lambda_rate 0.02 \
     --lambda_distill 0.1 \
     --lambda_importance 1.0 \
-    --lambda_imp_separation "$L_IMP_SEP" \
+    --lambda_imp_separation 0.2 \
     --imp_separation_margin 0.05 \
-    --distill_logit_loss "auto" \
+    --distill_logit_loss auto \
     --distill_temperature 1.0 \
     --distill_feature_weight 1.0 \
     --distill_logit_weight 1.0 \
+    --distill_feature_source "$DISTILL_FEATURE_SOURCE" \
     --distill_align_mode "$DISTILL_ALIGN_MODE" \
     --distill_align_hw "$DISTILL_ALIGN_HW" \
-    --distill_feature_source "$DISTILL_FEATURE_SOURCE" \
     --distill_teacher_score_min "$DISTILL_TEACHER_SCORE_MIN" \
     "${DISTILL_SCORE_FLAG[@]}" \
-    --importance_head_type "$HEAD_TYPE" \
-    --importance_hidden_channels 32 \
+    --importance_head_type pp_lite \
+    --importance_hidden_channels 64 \
     > "logs/${LOG_PREFIX}.out" 2> "logs/${LOG_PREFIX}.err"
-
 done
 
-echo "Pilot runs completed."
+echo "Stage2 distill-fix pilot runs completed."

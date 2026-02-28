@@ -227,6 +227,87 @@ Proposed fix:
 
 ---
 
+### Cycle I: Dual-track recovery for label-space mismatch (Semantic labels vs 3D boxes)
+Problem:
+- SemanticKITTI supervision is point-wise semantics, while final detector claim requires 3D bounding-box AP.
+- Proxy task metrics were useful for rapid iteration but are not sufficient for detector-level thesis claims.
+
+Proposed fix:
+- Split evaluation into two explicit tracks:
+  - Track-A: SemanticKITTI ROI-aware codec metrics.
+  - Track-B: KITTI detection official 3D AP/mAP via OpenPCDet.
+- Add KITTI detector endpoint tooling:
+  - `src/train/evaluate_kitti_map_vs_rate.py`
+  - `src/scripts/run_kitti_map_vs_rate.sh`
+  - `src/utils/match_bitrate_budget_detector.py`
+- Add standardized reconstruction-to-pointcloud utility:
+  - `src/utils/recon_pointcloud_export.py`
+- Add teacher quality gate:
+  - if original `ap3d_car_mod` is below threshold, trigger optional fine-tune branch (`src/scripts/run_teacher_finetune_kitti.sh`).
+
+Result:
+- Infrastructure and protocol are now separated for claim-safe reporting.
+- Track-A/Track-B boundaries are explicit in paper-facing tables.
+- Detector endpoint now has a reproducible execution path (OpenPCDet dependency required).
+
+---
+
+### Cycle J: Stage2 distillation signal refinement (teacher mismatch + alignment issue)
+Problem:
+- Stage2 could underperform because teacher objective space and current supervision space are not perfectly matched.
+- Legacy feature distillation used resize-only spatial alignment, which can be semantically weak across heterogeneous backbones.
+
+Proposed fix:
+- Add distillation alignment controls:
+  - `distill_align_mode={resize,adaptive_pool}`
+  - `distill_align_hw` for canonical pooled grid.
+- Add feature-map source controls:
+  - `distill_feature_source={channel_mean,energy_map,none}`.
+- Add optional teacher confidence gate:
+  - `distill_teacher_score_min` with `distill_teacher_score_weight`.
+- Add dedicated runnable ablation scripts:
+  - `run_stage2_distill_fix_pilot_local.sh`
+  - `run_stage2_distill_fix_ablation.sh`
+
+Result:
+- Code path now supports explicit tests of the “resize-only distill” hypothesis.
+- Distillation quality can be audited as a controllable variable, not a fixed hidden assumption.
+- Local smoke execution succeeded for all three new distill-fix cases (1-epoch short run), confirming runnable infra before full GPU sweep.
+
+---
+
+### Cycle K: Detector endpoint collapse traced to projection-path sparsification
+Problem:
+- Stage0/Stage1 losses kept decreasing, but reconstructed-cloud detector behavior was still poor.
+- This raised ambiguity between:
+  - under-training (`epochs`),
+  - insufficient importance-head capacity,
+  - representation damage before codec optimization.
+
+Proposed fix:
+- Run explicit decomposition diagnostics:
+  - `raw` vs `identity(project->unproject)` vs `reconstructed`.
+- Measure geometry loss from projection itself on val frames.
+- Re-check selected high-ROI frame with detector overlays.
+
+Result:
+- Training did not fail:
+  - Stage0 (`j22255_r5`): `21.3739 -> 1.5752` (50 epochs)
+  - Stage1 (`j22279_r1`): `21.7544 -> 1.7810` (50 epochs)
+- Projection-only loss is large:
+  - mean point-retention after projection: `0.4169` (200 val frames).
+  - mean collision factor (`raw/occupied`): `2.399`.
+- One-sample detector decomposition (`sample 003464`):
+  - raw: `123,592` points, `44` preds
+  - identity: `50,911` points, `27` preds
+  - Stage0 recon: `50,767` points, `1` pred
+  - Stage1 recon: `50,635` points, `0` pred
+- Interpretation:
+  - first-order bottleneck is representation sparsification in current fixed-grid single-return projection path.
+  - epoch/head effects remain possible but are not the dominant first explanation from current evidence.
+
+---
+
 ## 5) Current Status
 What is working:
 - Reproducible experiment system and parameter tracking.
@@ -234,20 +315,24 @@ What is working:
 - Stronger loss formulations.
 - Larger importance head integrated and trained at scale (150 epochs).
 - Fair-budget and oracle-decomposition tooling is now integrated in codebase.
+- Dual-track reporting policy is codified (SemanticKITTI codec track vs KITTI detector track).
 
 What is not fully solved:
 - Robust threshold calibration across runs.
 - FP-heavy ROI predictions in several operating regimes.
 - Clear downstream detector-level proof of gain under fixed deployment threshold.
+- Representation-preserving reconstruction path for detector endpoint:
+  - current projection path discards many points before codec comparison (`~58%` average drop in the 200-frame check).
 
 ---
 
 ## 6) Immediate Next Step Direction (for Stage3)
 Recommended Stage3 focus:
-1. Introduce calibrated threshold policy (global or run-adaptive).
-2. Optimize for precision-recall operating point, not only final training loss.
-3. Add detector-level evaluation protocol as primary acceptance metric.
-4. Compare fixed-threshold vs calibrated-threshold behavior in the report.
+1. Make `raw vs identity(project->unproject) vs reconstructed` a mandatory detector diagnostic baseline.
+2. Introduce calibrated threshold policy (global or run-adaptive).
+3. Optimize for precision-recall operating point, not only final training loss.
+4. Add detector-level evaluation protocol as primary acceptance metric.
+5. Compare fixed-threshold vs calibrated-threshold behavior in the report.
 
 ## 7) Stage3 Head Variants Implemented
 - Added Stage3 multi-scale ROI head options in code:

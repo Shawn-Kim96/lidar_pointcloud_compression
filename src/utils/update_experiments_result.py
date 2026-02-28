@@ -35,6 +35,11 @@ META_KEYS = [
     "distill_temperature",
     "distill_feature_weight",
     "distill_logit_weight",
+    "distill_align_mode",
+    "distill_align_hw",
+    "distill_feature_source",
+    "distill_teacher_score_min",
+    "distill_teacher_score_weight",
     "importance_head_type",
     "importance_hidden_channels",
     "teacher_proxy_ckpt",
@@ -325,6 +330,11 @@ def collect_runs(log_dir: Path) -> List[Dict[str, str]]:
             "distill_temperature": meta.get("distill_temperature", "1.0"),
             "distill_feature_weight": meta.get("distill_feature_weight", "1.0"),
             "distill_logit_weight": meta.get("distill_logit_weight", "1.0"),
+            "distill_align_mode": meta.get("distill_align_mode", "resize"),
+            "distill_align_hw": meta.get("distill_align_hw", "0,0"),
+            "distill_feature_source": meta.get("distill_feature_source", "channel_mean"),
+            "distill_teacher_score_min": meta.get("distill_teacher_score_min", "0.0"),
+            "distill_teacher_score_weight": meta.get("distill_teacher_score_weight", "False"),
             "importance_head_type": importance_head_type,
             "importance_head_type_source": importance_head_type_source,
             "importance_hidden_channels": meta.get("importance_hidden_channels", "32"),
@@ -437,6 +447,18 @@ def render_md(rows: List[Dict[str, str]], md_path: Path, log_dir: Path):
         "`auto` picks `bce` for 1-channel logits, `kl` otherwise. Can force `kl`/`bce`/`mse`. |"
     )
     lines.append(
+        "| `distill_align_mode` | Spatial alignment method for teacher-student distillation maps. | "
+        "`resize`: bilinear resize (legacy). `adaptive_pool`: pool both sides to common grid before loss. |"
+    )
+    lines.append(
+        "| `distill_feature_source` | Feature map conversion before distillation. | "
+        "`channel_mean`: channel-average map. `energy_map`: sqrt(mean(channel^2)) map. `none`: disable feature distill. |"
+    )
+    lines.append(
+        "| `distill_teacher_score_min` | Optional teacher quality gate threshold. | "
+        "If >0 and score-gate enabled, distillation weight is suppressed for low-score teacher samples. |"
+    )
+    lines.append(
         "| `importance_head_type` | Importance head architecture variant. | "
         "`basic`, `multiscale`, `pp_lite`, `bifpn`, `deformable_msa`, `dynamic`, `rangeformer`, `frnet`. |"
     )
@@ -453,20 +475,25 @@ def render_md(rows: List[Dict[str, str]], md_path: Path, log_dir: Path):
     lines.append("")
     lines.append(
         "| log_file | stage | backbone | quantizer_mode | quant_bits | loss_recipe | rate_loss_mode | "
-        "importance_loss_mode | distill_logit_loss | importance_head_type | lr | lambda_distill | "
+        "importance_loss_mode | distill_logit_loss | distill_align_mode | distill_feature_source | "
+        "distill_teacher_score_min | distill_teacher_score_weight | importance_head_type | lr | lambda_distill | "
         "lambda_importance | lambda_imp_separation | roi_target_mode | roi_target_mode_source | "
         "epochs | final_loss | final_eq_bits | final_code_entropy | rel_improve_% | save_dir |"
     )
-    lines.append("|---|---:|---|---|---:|---|---|---|---|---|---:|---:|---:|---:|---|---|---:|---:|---:|---:|---:|---|")
+    lines.append("|---|---:|---|---|---:|---|---|---|---|---|---|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---|")
 
     for r in rows:
         lines.append(
             f"| `{r['log_file']}` | {r['stage'] or 'n/a'} | {r['backbone'] or 'n/a'} | "
             f"{r['quantizer_mode'] or 'n/a'} | {r['quant_bits'] or 'n/a'} | "
-            f"{r.get('loss_recipe', 'n/a') or 'n/a'} | {r.get('rate_loss_mode', 'n/a') or 'n/a'} | "
-            f"{r.get('importance_loss_mode', 'n/a') or 'n/a'} | {r.get('distill_logit_loss', 'n/a') or 'n/a'} | "
-            f"{r.get('importance_head_type', 'n/a') or 'n/a'} | "
-            f"{r['lr'] or 'n/a'} | {_format_float(_safe_float(r['lambda_distill']), 3)} | "
+                f"{r.get('loss_recipe', 'n/a') or 'n/a'} | {r.get('rate_loss_mode', 'n/a') or 'n/a'} | "
+                f"{r.get('importance_loss_mode', 'n/a') or 'n/a'} | {r.get('distill_logit_loss', 'n/a') or 'n/a'} | "
+                f"{r.get('distill_align_mode', 'n/a') or 'n/a'} | "
+                f"{r.get('distill_feature_source', 'n/a') or 'n/a'} | "
+                f"{r.get('distill_teacher_score_min', 'n/a') or 'n/a'} | "
+                f"{r.get('distill_teacher_score_weight', 'n/a') or 'n/a'} | "
+                f"{r.get('importance_head_type', 'n/a') or 'n/a'} | "
+                f"{r['lr'] or 'n/a'} | {_format_float(_safe_float(r['lambda_distill']), 3)} | "
             f"{_format_float(_safe_float(r['lambda_importance']), 3)} | "
             f"{_format_float(_safe_float(r.get('lambda_imp_separation')), 3)} | "
             f"{r['roi_target_mode'] or 'n/a'} | {r['roi_target_mode_source'] or 'n/a'} | "

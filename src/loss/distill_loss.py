@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -18,6 +18,24 @@ def _resize_like(x: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
     if x.shape[-2:] == ref.shape[-2:]:
         return x
     return F.interpolate(x, size=ref.shape[-2:], mode="bilinear", align_corners=False)
+
+
+def _parse_hw(value: Union[str, Tuple[int, int], list, None]) -> Optional[Tuple[int, int]]:
+    if value is None:
+        return None
+    if isinstance(value, (tuple, list)) and len(value) == 2:
+        h, w = int(value[0]), int(value[1])
+        return (h, w) if h > 0 and w > 0 else None
+    if isinstance(value, str):
+        text = value.strip().lower().replace("x", ",")
+        if not text:
+            return None
+        toks = [t.strip() for t in text.split(",") if t.strip()]
+        if len(toks) != 2:
+            return None
+        h, w = int(toks[0]), int(toks[1])
+        return (h, w) if h > 0 and w > 0 else None
+    return None
 
 
 def weighted_mse(pred: torch.Tensor, target: torch.Tensor, weight: Optional[torch.Tensor] = None) -> torch.Tensor:
@@ -93,6 +111,8 @@ class DistillLoss(nn.Module):
         temperature: float = 1.0,
         loss_type: str = "mse",
         logit_loss_type: str = "auto",
+        align_mode: str = "resize",
+        align_hw: Optional[Union[str, Tuple[int, int], list]] = None,
     ):
         super(DistillLoss, self).__init__()
         self.feature_weight = float(feature_weight)
@@ -100,10 +120,41 @@ class DistillLoss(nn.Module):
         self.temperature = float(temperature)
         self.loss_type = str(loss_type).lower()
         self.logit_loss_type = str(logit_loss_type).lower()
+        self.align_mode = str(align_mode).lower()
+        self.align_hw = _parse_hw(align_hw)
         if self.loss_type not in ("mse", "l1"):
             raise ValueError("loss_type must be one of: mse, l1")
         if self.logit_loss_type not in ("auto", "kl", "bce", "mse"):
             raise ValueError("logit_loss_type must be one of: auto, kl, bce, mse")
+        if self.align_mode not in ("resize", "adaptive_pool"):
+            raise ValueError("align_mode must be one of: resize, adaptive_pool")
+
+    def _resolve_align_hw(self, student: torch.Tensor, teacher: torch.Tensor) -> Tuple[int, int]:
+        if self.align_hw is not None:
+            return self.align_hw
+        return (
+            min(int(student.shape[-2]), int(teacher.shape[-2])),
+            min(int(student.shape[-1]), int(teacher.shape[-1])),
+        )
+
+    def _align_pair(self, student: torch.Tensor, teacher: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        student = _ensure_4d(student)
+        teacher = _ensure_4d(teacher)
+        if self.align_mode == "resize":
+            return student, _resize_like(teacher, student)
+        hw = self._resolve_align_hw(student, teacher)
+        student = F.adaptive_avg_pool2d(student, output_size=hw)
+        teacher = F.adaptive_avg_pool2d(teacher, output_size=hw)
+        return student, teacher
+
+    def _align_weight(self, weight: Optional[torch.Tensor], ref: torch.Tensor) -> Optional[torch.Tensor]:
+        if weight is None:
+            return None
+        w = _ensure_4d(weight)
+        if self.align_mode == "adaptive_pool":
+            w = F.adaptive_avg_pool2d(w, output_size=ref.shape[-2:])
+            return w.clamp(min=0.0)
+        return _resize_like(w, ref).clamp(min=0.0)
 
     def _feature_loss(
         self,
@@ -111,15 +162,15 @@ class DistillLoss(nn.Module):
         teacher_features: torch.Tensor,
         importance_map: Optional[torch.Tensor],
     ) -> torch.Tensor:
-        student_features = _ensure_4d(student_features)
-        teacher_features = _resize_like(teacher_features, student_features)
+        student_features, teacher_features = self._align_pair(student_features, teacher_features)
+        aligned_weight = self._align_weight(importance_map, student_features)
         if self.loss_type == "l1":
             diff = torch.abs(student_features - teacher_features)
-            if importance_map is None:
+            if aligned_weight is None:
                 return diff.mean()
-            w = _resize_like(importance_map, student_features).clamp(min=0.0)
+            w = aligned_weight
             return (diff * w).sum() / w.sum().clamp(min=1.0)
-        return weighted_mse(student_features, teacher_features, weight=importance_map)
+        return weighted_mse(student_features, teacher_features, weight=aligned_weight)
 
     def forward(
         self,
@@ -151,8 +202,8 @@ class DistillLoss(nn.Module):
             details["feature_distill"] = float(f_loss.detach().item())
 
         if student_logits is not None and teacher_logits is not None and self.logit_weight > 0.0:
-            student_logits = _ensure_4d(student_logits)
-            teacher_logits = _resize_like(teacher_logits, student_logits)
+            student_logits, teacher_logits = self._align_pair(student_logits, teacher_logits)
+            aligned_weight = self._align_weight(importance_map, student_logits)
 
             logit_loss_type = self.logit_loss_type
             if logit_loss_type == "auto":
@@ -164,20 +215,20 @@ class DistillLoss(nn.Module):
                     student_logits=student_logits,
                     teacher_logits=teacher_logits,
                     temperature=self.temperature,
-                    weight=importance_map,
+                    weight=aligned_weight,
                 )
             elif logit_loss_type == "bce":
                 l_loss = weighted_bce_with_logits(
                     student_logits=student_logits,
                     teacher_logits=teacher_logits,
                     temperature=self.temperature,
-                    weight=importance_map,
+                    weight=aligned_weight,
                 )
             else:
                 l_loss = weighted_logit_mse(
                     student_logits=student_logits,
                     teacher_logits=teacher_logits,
-                    weight=importance_map,
+                    weight=aligned_weight,
                 )
             total = total + (self.logit_weight * l_loss)
             details["logit_distill"] = float(l_loss.detach().item())

@@ -1,0 +1,9 @@
+description = "Switch to paper/reviewer response mode with claim-safe writing."
+prompt = """
+@{.gemini/prompts/role_paper_reviewer_response.md}
+@{.gemini/prompts/context_lidar_compression_research.md}
+
+Apply this role for the next answer.
+User focus: {{args}}
+"""
+

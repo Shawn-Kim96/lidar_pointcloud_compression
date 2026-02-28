@@ -51,6 +51,20 @@ BATCH_SIZE=${BATCH_SIZE:-4}
 NUM_WORKERS=${NUM_WORKERS:-4}
 LR=${LR:-1e-4}
 MAX_TRAIN_FRAMES=${MAX_TRAIN_FRAMES:-0}
+DATASET_TYPE=${DATASET_TYPE:-kitti3dobject}
+if [[ "${DATASET_TYPE}" == "kitti3dobject" ]]; then
+  DATA_ROOT=${DATA_ROOT:-data/dataset/kitti3dobject}
+  KITTI_SPLIT=${KITTI_SPLIT:-train}
+  KITTI_IMAGESET_FILE=${KITTI_IMAGESET_FILE:-}
+  KITTI_ROI_CLASSES=${KITTI_ROI_CLASSES:-Car,Pedestrian,Cyclist}
+  WAIT_FOR_KITTI_SEC=${WAIT_FOR_KITTI_SEC:-0}
+  WAIT_POLL_SEC=${WAIT_POLL_SEC:-60}
+else
+  DATA_ROOT=${DATA_ROOT:-data/dataset/semantickitti/dataset/sequences}
+  KITTI_SPLIT=${KITTI_SPLIT:-train}
+  KITTI_IMAGESET_FILE=${KITTI_IMAGESET_FILE:-}
+  KITTI_ROI_CLASSES=${KITTI_ROI_CLASSES:-Car,Pedestrian,Cyclist}
+fi
 L_RECON=${L_RECON:-1.0}
 L_RATE=${L_RATE:-0.0}
 L_DISTILL=${L_DISTILL:-0.0}
@@ -74,7 +88,13 @@ echo "backbone: ${BACKBONE}"
 echo "teacher_backend: none"
 echo "run_id: ${RUN_ID}"
 echo "save_dir: ${SAVE_DIR}"
-echo "dataset_root: data/dataset/semantickitti/dataset/sequences"
+echo "dataset_root: ${DATA_ROOT}"
+echo "dataset_type: ${DATASET_TYPE}"
+if [[ "${DATASET_TYPE}" == "kitti3dobject" ]]; then
+echo "kitti_split: ${KITTI_SPLIT}"
+echo "kitti_imageset_file: ${KITTI_IMAGESET_FILE:-auto(ImageSets/<split>.txt)}"
+echo "kitti_roi_classes: ${KITTI_ROI_CLASSES}"
+fi
 echo "epochs: ${EPOCHS}"
 echo "batch_size: ${BATCH_SIZE}"
 echo "num_workers: ${NUM_WORKERS}"
@@ -92,9 +112,39 @@ echo "python_env: ${PYTHON_ENV_DESC}"
 echo "started_at: $(date '+%Y-%m-%d %H:%M:%S %Z')"
 echo "============================================================"
 
+if [[ "${DATASET_TYPE}" == "kitti3dobject" && "${WAIT_FOR_KITTI_SEC}" -gt 0 ]]; then
+    KITTI_REQUIRED=("ImageSets" "training/velodyne" "training/label_2" "training/calib")
+    deadline=$(( $(date +%s) + WAIT_FOR_KITTI_SEC ))
+    while true; do
+        ready=1
+        for rel in "${KITTI_REQUIRED[@]}"; do
+            if [[ ! -d "${DATA_ROOT}/${rel}" ]]; then
+                ready=0
+                break
+            fi
+        done
+        if [[ "${ready}" == "1" && -f "${DATA_ROOT}/ImageSets/train.txt" ]]; then
+            bin_count=$(find "${DATA_ROOT}/training/velodyne" -maxdepth 1 -name '*.bin' | wc -l | tr -d '[:space:]')
+            if [[ "${bin_count}" -ge 1000 ]]; then
+                break
+            fi
+        fi
+        now=$(date +%s)
+        if [[ "${now}" -ge "${deadline}" ]]; then
+            echo "Error: KITTI dataset not ready within WAIT_FOR_KITTI_SEC=${WAIT_FOR_KITTI_SEC}" >&2
+            exit 1
+        fi
+        echo "[stage0] waiting for KITTI extraction ... (bin_count=${bin_count:-0})"
+        sleep "${WAIT_POLL_SEC}"
+    done
+fi
+
 TRAIN_CMD=(
     "${PYTHON_RUNNER[@]}" src/main_train.py
-    --data_root "data/dataset/semantickitti/dataset/sequences"
+    --data_root "${DATA_ROOT}"
+    --dataset_type "${DATASET_TYPE}"
+    --kitti_split "${KITTI_SPLIT}"
+    --kitti_roi_classes "${KITTI_ROI_CLASSES}"
     --backbone "$BACKBONE"
     --lr "$LR"
     --epochs "$EPOCHS"
@@ -110,6 +160,10 @@ TRAIN_CMD=(
     --lambda_distill "$L_DISTILL"
     --lambda_importance "$L_IMPORTANCE"
 )
+
+if [[ -n "${KITTI_IMAGESET_FILE}" ]]; then
+    TRAIN_CMD+=(--kitti_imageset_file "${KITTI_IMAGESET_FILE}")
+fi
 
 if [[ "${MAX_TRAIN_FRAMES}" -gt 0 ]]; then
     TRAIN_CMD+=(--max_train_frames "$MAX_TRAIN_FRAMES")

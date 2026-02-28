@@ -1,0 +1,91 @@
+# Research Plan: Dual-Track LiDAR Compression Evaluation
+
+## Objective
+To rigorously evaluate the impact of adaptive range-image compression on downstream perception using two distinct paradigms:
+1.  **Track 1 (Domain-Adapted Point-based):** Bridging the domain gap between "Raw" and "Reconstructed" point clouds by fine-tuning the detector (PointPillars).
+2.  **Track 2 (Native Range-based):** Eliminating the projection bottleneck by using a detector that operates directly on the compressed Range Image (LaserNet/RangeDet).
+
+---
+
+## Phase 1: Data Preparation (Common Foundation)
+**Goal:** Generate the "Identity" dataset. This represents the upper bound of performance for any range-image-based method (compression ratio = 1:1, but geometric loss from projection exists).
+
+### Task 1.1: Implement Bulk Export Script
+*   **File:** `src/utils/recon_pointcloud_export.py`
+*   **Action:** Add CLI support to process entire KITTI splits (training/testing).
+*   **Logic:**
+    1.  Iterate over all `.bin` files in `KITTI_ROOT/training/velodyne`.
+    2.  Load Point Cloud -> Project to Range Image (64x1024) -> Unproject to Point Cloud.
+    3.  Save to `KITTI_IDENTITY_ROOT/training/velodyne`.
+    4.  Symlink `label_2`, `calib`, `ImageSets` to maintain KITTI format compatibility.
+
+### Task 1.2: Generate Dataset
+*   **Command:**
+    ```bash
+    python src/utils/recon_pointcloud_export.py \
+      --kitti_root data/dataset/kitti3dobject \
+      --output_root data/dataset/kitti_identity \
+      --split training
+    ```
+
+## Track 1: Domain-Adapted PointPillars (The "Realist" Approach)
+**Hypothesis:** PointPillars fails on reconstructed data not because the data is "bad", but because the density distribution is "different" (domain shift). Fine-tuning will recover this performance.
+
+### Step 1: Fine-tune PointPillars on `KITTI_Identity`
+*   **Script:** `src/scripts/run_pointpillar_kitti_finetune.sh`
+*   **Config:** Use standard PointPillars config, but override `DATA_PATH`.
+*   **Execution:**
+    ```bash
+    # Fine-tune for ~20 epochs is likely sufficient for adaptation
+    KITTI_ROOT_OFFICIAL=data/dataset/kitti_identity \
+    EPOCHS=20 \
+    BATCH_SIZE=4 \
+    EXTRA_TAG=pp_finetune_identity \
+    bash src/scripts/run_pointpillar_kitti_finetune.sh
+    ```
+*   **Output:** A new checkpoint `pp_finetune_identity.pth` that is expert at detecting objects in *reconstructed* point clouds.
+
+### Step 2: Establish the "Identity Baseline"
+*   **Action:** Evaluate the fine-tuned model on the validation set of `KITTI_Identity`.
+*   **Metric:** This mAP is our "Gold Standard" (Target 100%). If Identity mAP is 70.0, and Raw mAP was 75.0, our goal for compression is 70.0, not 75.0.
+
+### Step 3: Evaluate Compression Models
+*   **Script:** `src/scripts/run_kitti_map_vs_rate.sh`
+*   **Action:**
+    1.  Take your Stage1/Stage2 compression models.
+    2.  Reconstruct point clouds from them.
+    3.  Run inference using the **Fine-tuned PointPillars** (from Step 1).
+*   **Command:**
+    ```bash
+    OPENPCDET_CKPT=path/to/pp_finetune_identity.pth \
+    bash src/scripts/run_kitti_map_vs_rate.sh
+    ```
+
+## Track 2: Native Range-View Detection (The "Purist" Approach)
+**Hypothesis:** Converting back to point clouds is inefficient. A detector trained on the Range Image (RI) directly will be more robust to compression artifacts.
+
+### Step 1: Implement Range Detection Head
+*   **File:** `src/models/range_det_head.py`
+*   **Architecture:**
+    *   Input: Decoder feature map (B, C, H, W).
+    *   Layers: Decoupled Classification and Regression branches (Shared Conv -> Cls Head / Reg Head).
+    *   Output: (B, N_class + 8, H, W).
+    *   8 Box params: dx, dy, dz, log(l), log(w), log(h), sin(theta), cos(theta).
+
+### Step 2: Implement Range Detection Loss
+*   **File:** `src/loss/range_det_loss.py`
+*   **Logic:**
+    1.  Project 3D GT Boxes onto the Range Image grid (H, W).
+    2.  Generate dense pixel-wise targets:
+        *   Classification: Focal Loss target (1 if pixel in box, 0 else).
+        *   Regression: Smooth L1 Loss target (offset from pixel center to box center).
+    3.  Mask out empty pixels (range=0).
+
+### Step 3: Train Jointly or Fine-tune
+*   **Strategy:** Attach `RangeDetHead` to the frozen Encoder/Decoder (or fine-tune end-to-end).
+*   **Data:** Train on `Raw Range Images` first to establish baseline, then fine-tune on `Compressed Range Images` (Stage 1/2 outputs).
+
+## Execution Roadmap
+1.  **Immediate:** Complete Phase 1 (Data Prep).
+2.  **Short-term:** Run Track 1 (Fine-tuning) to get valid numbers for the paper's "Method" section.
+3.  **Mid-term:** Implement Track 2 components (`RangeDetHead`) as a "Future Work" or "Advanced Method" proof-of-concept.

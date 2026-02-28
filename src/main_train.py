@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 
 from train.trainer import Trainer
 from dataset.semantickitti_loader import SemanticKittiDataset
+from dataset.kitti_object_loader import KittiObjectRangeDataset
 import models.compression
 import models.backbones
 
@@ -44,6 +45,32 @@ def parse_args():
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--data_root", type=str, required=True)
+    parser.add_argument(
+        "--dataset_type",
+        type=str,
+        default="semantickitti",
+        choices=("semantickitti", "kitti3dobject"),
+        help="Training dataset backend.",
+    )
+    parser.add_argument(
+        "--kitti_split",
+        type=str,
+        default="train",
+        choices=("train", "val", "trainval", "test"),
+        help="ImageSets split used when dataset_type=kitti3dobject.",
+    )
+    parser.add_argument(
+        "--kitti_imageset_file",
+        type=str,
+        default="",
+        help="Optional explicit ImageSets file path for KITTI object.",
+    )
+    parser.add_argument(
+        "--kitti_roi_classes",
+        type=str,
+        default="Car,Pedestrian,Cyclist",
+        help="Comma-separated classes to define ROI for KITTI object.",
+    )
     parser.add_argument("--save_dir", type=str, default=None)
     parser.add_argument("--max_train_frames", type=int, default=0, help="If >0, train on first N frames for fast ablations.")
     
@@ -83,6 +110,31 @@ def parse_args():
     parser.add_argument("--distill_temperature", type=float, default=1.0)
     parser.add_argument("--distill_feature_weight", type=float, default=1.0)
     parser.add_argument("--distill_logit_weight", type=float, default=1.0)
+    parser.add_argument("--distill_align_mode", type=str, default="resize", choices=("resize", "adaptive_pool"))
+    parser.add_argument(
+        "--distill_align_hw",
+        type=str,
+        default="0,0",
+        help="Target hw for adaptive_pool alignment (e.g., 16,32). 0,0 means auto(min dims).",
+    )
+    parser.add_argument(
+        "--distill_feature_source",
+        type=str,
+        default="channel_mean",
+        choices=("channel_mean", "energy_map", "none"),
+        help="Feature distillation map type.",
+    )
+    parser.add_argument(
+        "--distill_teacher_score_min",
+        type=float,
+        default=0.0,
+        help="If >0, only distill from teacher samples with score >= threshold.",
+    )
+    parser.add_argument(
+        "--distill_teacher_score_weight",
+        action="store_true",
+        help="Enable per-sample teacher score gate for distill weighting.",
+    )
 
     # Importance head config
     parser.add_argument(
@@ -120,6 +172,11 @@ def _print_experiment_summary(args, device, save_dir):
     print(f"save_dir: {save_dir}")
     print(f"device: {device}")
     print(f"dataset_root: {args.data_root}")
+    print(f"dataset_type: {args.dataset_type}")
+    if args.dataset_type == "kitti3dobject":
+        print(f"kitti_split: {args.kitti_split}")
+        print(f"kitti_imageset_file: {args.kitti_imageset_file or 'auto(ImageSets/<split>.txt)'}")
+        print(f"kitti_roi_classes: {args.kitti_roi_classes}")
     print(f"epochs: {args.epochs}")
     print(f"batch_size: {args.batch_size}")
     print(f"num_workers: {args.num_workers}")
@@ -140,6 +197,11 @@ def _print_experiment_summary(args, device, save_dir):
     print(f"distill_temperature: {args.distill_temperature}")
     print(f"distill_feature_weight: {args.distill_feature_weight}")
     print(f"distill_logit_weight: {args.distill_logit_weight}")
+    print(f"distill_align_mode: {args.distill_align_mode}")
+    print(f"distill_align_hw: {args.distill_align_hw}")
+    print(f"distill_feature_source: {args.distill_feature_source}")
+    print(f"distill_teacher_score_min: {args.distill_teacher_score_min}")
+    print(f"distill_teacher_score_weight: {args.distill_teacher_score_weight}")
     print(f"importance_head_type: {args.importance_head_type}")
     print(f"importance_hidden_channels: {args.importance_hidden_channels}")
     print(f"teacher_proxy_ckpt: {args.teacher_proxy_ckpt if args.teacher_proxy_ckpt else 'none'}")
@@ -161,11 +223,23 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     # Dataloader
-    train_dataset = SemanticKittiDataset(
-        root_dir=args.data_root,
-        sequences=["00", "01", "02", "03", "04", "05", "06", "07", "09", "10"],
-        return_roi_mask=True
-    )
+    if args.dataset_type == "semantickitti":
+        train_dataset = SemanticKittiDataset(
+            root_dir=args.data_root,
+            sequences=["00", "01", "02", "03", "04", "05", "06", "07", "09", "10"],
+            return_roi_mask=True
+        )
+    elif args.dataset_type == "kitti3dobject":
+        roi_classes = [c.strip() for c in args.kitti_roi_classes.split(",") if c.strip()]
+        train_dataset = KittiObjectRangeDataset(
+            root_dir=args.data_root,
+            split=args.kitti_split,
+            imageset_file=args.kitti_imageset_file or None,
+            return_roi_mask=True,
+            roi_classes=roi_classes,
+        )
+    else:
+        raise ValueError(f"Unsupported dataset_type: {args.dataset_type}")
     if args.max_train_frames and args.max_train_frames > 0:
         max_frames = min(int(args.max_train_frames), len(train_dataset))
         train_dataset = Subset(train_dataset, list(range(max_frames)))
@@ -264,6 +338,11 @@ def main():
             "distill_temperature": args.distill_temperature,
             "distill_feature_weight": args.distill_feature_weight,
             "distill_logit_weight": args.distill_logit_weight,
+            "distill_align_mode": args.distill_align_mode,
+            "distill_align_hw": args.distill_align_hw,
+            "distill_feature_source": args.distill_feature_source,
+            "distill_teacher_score_min": args.distill_teacher_score_min,
+            "distill_teacher_score_weight": args.distill_teacher_score_weight,
         },
         "supervision": {
             "type": "roi",
