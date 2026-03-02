@@ -41,6 +41,7 @@ EPOCHS=${EPOCHS:-80}
 BATCH_SIZE=${BATCH_SIZE:-4}
 NUM_WORKERS=${NUM_WORKERS:-4}
 MAX_TRAIN_FRAMES=${MAX_TRAIN_FRAMES:-0}
+MIN_GPU_MEM_GB=${MIN_GPU_MEM_GB:-0}
 
 QUANTIZER_MODE=${QUANTIZER_MODE:-adaptive}
 QUANT_BITS=${QUANT_BITS:-8}
@@ -67,6 +68,14 @@ DISTILL_LOGIT_WEIGHT=${DISTILL_LOGIT_WEIGHT:-1.0}
 
 IMPORTANCE_HEAD_TYPE=${IMPORTANCE_HEAD_TYPE:-pp_lite}
 IMPORTANCE_HIDDEN_CHANNELS=${IMPORTANCE_HIDDEN_CHANNELS:-64}
+
+if [[ "${MIN_GPU_MEM_GB}" == "0" ]]; then
+  if [[ "${IMPORTANCE_HIDDEN_CHANNELS}" -ge 96 ]]; then
+    MIN_GPU_MEM_GB=30
+  else
+    MIN_GPU_MEM_GB=14
+  fi
+fi
 
 CASE_TAGS=("energy_pool_16x32" "energy_pool_16x32_scoregate015")
 DISTILL_FEATURE_SOURCES=("energy_map" "energy_map")
@@ -152,6 +161,36 @@ echo "slurm_array_job_id: ${SLURM_ARRAY_JOB_ID:-n/a}"
 echo "slurm_array_task_id: ${SLURM_ARRAY_TASK_ID:-n/a}"
 echo "started_at: $(date '+%Y-%m-%d %H:%M:%S %Z')"
 echo "============================================================"
+
+set +e
+GPU_GUARD_OUT="$("${PYTHON_RUNNER[@]}" - "${MIN_GPU_MEM_GB}" <<'PY' 2>&1
+import sys
+import torch
+
+min_gb = float(sys.argv[1])
+if not torch.cuda.is_available():
+    print("[stage2-fix] cuda_available=0")
+    raise SystemExit(2)
+
+props = torch.cuda.get_device_properties(0)
+mem_gb = props.total_memory / (1024 ** 3)
+print(f"[stage2-fix] gpu_name={props.name} gpu_mem_gb={mem_gb:.2f} min_required_gb={min_gb:.2f}")
+if mem_gb + 1e-6 < min_gb:
+    raise SystemExit(3)
+PY
+)"
+gpu_guard_status=$?
+set -e
+echo "${GPU_GUARD_OUT}"
+if [[ "${gpu_guard_status}" == "2" ]]; then
+  echo "Error: CUDA unavailable for stage2-fix run." >&2
+  exit 1
+fi
+if [[ "${gpu_guard_status}" == "3" ]]; then
+  echo "Error: insufficient GPU memory for this config." >&2
+  echo "Error: rerun on high-memory GPU (e.g., --gres=gpu:a100:1)." >&2
+  exit 1
+fi
 
 DISTILL_SCORE_FLAG=()
 if [[ "${DISTILL_TEACHER_SCORE_WEIGHT}" == "1" ]]; then

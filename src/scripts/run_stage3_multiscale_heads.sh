@@ -46,6 +46,7 @@ BATCH_SIZE=${BATCH_SIZE:-4}
 NUM_WORKERS=${NUM_WORKERS:-4}
 MAX_TRAIN_FRAMES=${MAX_TRAIN_FRAMES:-0}
 LR=${LR:-1e-4}
+MIN_GPU_MEM_GB=${MIN_GPU_MEM_GB:-30}
 
 ROI_LEVELS=${ROI_LEVELS:-256}
 BG_LEVELS=${BG_LEVELS:-16}
@@ -126,6 +127,36 @@ echo "slurm_array_task_id: ${SLURM_ARRAY_TASK_ID:-n/a}"
 echo "python_env: ${PYTHON_ENV_DESC}"
 echo "started_at: $(date '+%Y-%m-%d %H:%M:%S %Z')"
 echo "============================================================"
+
+set +e
+GPU_GUARD_OUT="$("${PYTHON_RUNNER[@]}" - "${MIN_GPU_MEM_GB}" <<'PY' 2>&1
+import sys
+import torch
+
+min_gb = float(sys.argv[1])
+if not torch.cuda.is_available():
+    print("[stage3] cuda_available=0")
+    raise SystemExit(2)
+
+props = torch.cuda.get_device_properties(0)
+mem_gb = props.total_memory / (1024 ** 3)
+print(f"[stage3] gpu_name={props.name} gpu_mem_gb={mem_gb:.2f} min_required_gb={min_gb:.2f}")
+if mem_gb + 1e-6 < min_gb:
+    raise SystemExit(3)
+PY
+)"
+gpu_guard_status=$?
+set -e
+echo "${GPU_GUARD_OUT}"
+if [[ "${gpu_guard_status}" == "2" ]]; then
+  echo "Error: CUDA unavailable for stage3 run." >&2
+  exit 1
+fi
+if [[ "${gpu_guard_status}" == "3" ]]; then
+  echo "Error: insufficient GPU memory for stage3 head ablation." >&2
+  echo "Error: rerun on high-memory GPU (e.g., --gres=gpu:a100:1)." >&2
+  exit 1
+fi
 
 "${PYTHON_RUNNER[@]}" src/main_train.py \
     --data_root "data/dataset/semantickitti/dataset/sequences" \
