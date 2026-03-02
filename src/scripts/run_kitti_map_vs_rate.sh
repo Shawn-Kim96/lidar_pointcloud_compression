@@ -18,6 +18,8 @@
 #   REBUILD_KITTI_INFOS=0
 #   RUN_ORIGINAL_SANITY=1
 #   SANITY_BATCH_SIZE=1
+#   SANITY_MAX_RETRIES=3
+#   SANITY_RETRY_SLEEP_SEC=20
 #   REQUIRE_CUDA=1
 #   KITTI_MAX_SPLIT_SAMPLES=10000
 #   KITTI_MAX_TRAIN_FILES=10000
@@ -71,6 +73,8 @@ SETUP_OPENPCDET=${SETUP_OPENPCDET:-0}
 REBUILD_KITTI_INFOS=${REBUILD_KITTI_INFOS:-0}
 RUN_ORIGINAL_SANITY=${RUN_ORIGINAL_SANITY:-1}
 SANITY_BATCH_SIZE=${SANITY_BATCH_SIZE:-1}
+SANITY_MAX_RETRIES=${SANITY_MAX_RETRIES:-3}
+SANITY_RETRY_SLEEP_SEC=${SANITY_RETRY_SLEEP_SEC:-20}
 REQUIRE_CUDA=${REQUIRE_CUDA:-1}
 KITTI_MAX_SPLIT_SAMPLES=${KITTI_MAX_SPLIT_SAMPLES:-10000}
 KITTI_MAX_TRAIN_FILES=${KITTI_MAX_TRAIN_FILES:-10000}
@@ -259,16 +263,34 @@ UPDATE_PAPER_TABLE=${UPDATE_PAPER_TABLE:-1}
 
 if [[ "${RUN_ORIGINAL_SANITY}" == "1" ]]; then
   CAR_AP3D_MOD=""
-  SANITY_LOG="logs/kitti_original_sanity_$(date +%Y%m%d_%H%M%S).log"
-  echo "[kitti-map] running original sanity (tools/test.py) -> ${SANITY_LOG}"
-  (
-    cd "${OPENPCDET_ROOT}/tools"
-    "${PYTHON_RUNNER[@]}" test.py \
-      --cfg_file "${OPENPCDET_CFG}" \
-      --ckpt "${OPENPCDET_CKPT}" \
-      --batch_size "${SANITY_BATCH_SIZE}" \
-      2>&1 | tee "${ROOT_DIR}/${SANITY_LOG}"
-  )
+  SANITY_LOG=""
+  attempt=1
+  while true; do
+    SANITY_LOG="logs/kitti_original_sanity_$(date +%Y%m%d_%H%M%S)_try${attempt}.log"
+    echo "[kitti-map] running original sanity (tools/test.py) attempt=${attempt}/${SANITY_MAX_RETRIES} -> ${SANITY_LOG}"
+    set +e
+    (
+      cd "${OPENPCDET_ROOT}/tools"
+      "${PYTHON_RUNNER[@]}" test.py \
+        --cfg_file "${OPENPCDET_CFG}" \
+        --ckpt "${OPENPCDET_CKPT}" \
+        --batch_size "${SANITY_BATCH_SIZE}" \
+        2>&1 | tee "${ROOT_DIR}/${SANITY_LOG}"
+    )
+    sanity_status=$?
+    set -e
+    if [[ "${sanity_status}" == "0" ]]; then
+      break
+    fi
+    if grep -qi "CUDA-capable device(s) is/are busy or unavailable" "${SANITY_LOG}" && [[ "${attempt}" -lt "${SANITY_MAX_RETRIES}" ]]; then
+      echo "[kitti-map][warn] sanity failed due to transient CUDA busy/unavailable, retrying in ${SANITY_RETRY_SLEEP_SEC}s ..."
+      sleep "${SANITY_RETRY_SLEEP_SEC}"
+      attempt=$((attempt + 1))
+      continue
+    fi
+    echo "Error: original sanity run failed (status=${sanity_status}). log=${SANITY_LOG}" >&2
+    exit 1
+  done
 
   set +e
   CAR_AP3D_MOD="$("${PYTHON_RUNNER[@]}" - "${ROOT_DIR}/${SANITY_LOG}" <<'PY'
