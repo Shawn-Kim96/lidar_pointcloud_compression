@@ -64,6 +64,8 @@ NUM_WORKERS=${NUM_WORKERS:-4}
 MAX_TRAIN_FRAMES=${MAX_TRAIN_FRAMES:-0}
 LR=${LR:-1e-4}
 MIN_GPU_MEM_GB=${MIN_GPU_MEM_GB:-30}
+TRAIN_MAX_RETRIES=${TRAIN_MAX_RETRIES:-3}
+TRAIN_RETRY_SLEEP_SEC=${TRAIN_RETRY_SLEEP_SEC:-30}
 
 ROI_LEVELS=${ROI_LEVELS:-256}
 BG_LEVELS=${BG_LEVELS:-16}
@@ -175,40 +177,62 @@ if [[ "${gpu_guard_status}" == "3" ]]; then
   exit 1
 fi
 
-"${PYTHON_RUNNER[@]}" src/main_train.py \
-    --data_root "data/dataset/semantickitti/dataset/sequences" \
-    --backbone "$BACKBONE" \
-    --lr "$LR" \
-    --epochs "$EPOCHS" \
-    --batch_size "$BATCH_SIZE" \
-    --num_workers "$NUM_WORKERS" \
-    --max_train_frames "$MAX_TRAIN_FRAMES" \
-    --teacher_backend "$TEACHER_BACKEND" \
-    --teacher_proxy_ckpt "$TEACHER_PROXY_CKPT" \
-    --run_id "$RUN_ID" \
-    --save_dir "$SAVE_DIR" \
-    --quantizer_mode "$QUANTIZER_MODE" \
-    --quant_bits "$QUANT_BITS" \
-    --roi_levels "$ROI_LEVELS" \
-    --bg_levels "$BG_LEVELS" \
-    --roi_target_mode "$ROI_TARGET_MODE" \
-    --loss_recipe "$LOSS_RECIPE" \
-    --rate_loss_mode "$RATE_LOSS_MODE" \
-    --importance_loss_mode "$IMPORTANCE_LOSS_MODE" \
-    --importance_pos_weight_mode "$IMPORTANCE_POS_WEIGHT_MODE" \
-    --importance_pos_weight "$IMPORTANCE_POS_WEIGHT" \
-    --importance_pos_weight_max "$IMPORTANCE_POS_WEIGHT_MAX" \
-    --lambda_recon "$L_RECON" \
-    --lambda_rate "$L_RATE" \
-    --lambda_distill "$L_DISTILL" \
-    --lambda_importance "$L_IMPORTANCE" \
-    --lambda_imp_separation "$L_IMP_SEPARATION" \
-    --imp_separation_margin "$IMP_SEPARATION_MARGIN" \
-    --distill_logit_loss "$DISTILL_LOGIT_LOSS" \
-    --distill_temperature "$DISTILL_TEMPERATURE" \
-    --distill_feature_weight "$DISTILL_FEATURE_WEIGHT" \
-    --distill_logit_weight "$DISTILL_LOGIT_WEIGHT" \
-    --importance_head_type "$HEAD_TYPE" \
-    --importance_hidden_channels "$IMPORTANCE_HIDDEN_CHANNELS"
+run_train_once() {
+  "${PYTHON_RUNNER[@]}" src/main_train.py \
+      --data_root "data/dataset/semantickitti/dataset/sequences" \
+      --backbone "$BACKBONE" \
+      --lr "$LR" \
+      --epochs "$EPOCHS" \
+      --batch_size "$BATCH_SIZE" \
+      --num_workers "$NUM_WORKERS" \
+      --max_train_frames "$MAX_TRAIN_FRAMES" \
+      --teacher_backend "$TEACHER_BACKEND" \
+      --teacher_proxy_ckpt "$TEACHER_PROXY_CKPT" \
+      --run_id "$RUN_ID" \
+      --save_dir "$SAVE_DIR" \
+      --quantizer_mode "$QUANTIZER_MODE" \
+      --quant_bits "$QUANT_BITS" \
+      --roi_levels "$ROI_LEVELS" \
+      --bg_levels "$BG_LEVELS" \
+      --roi_target_mode "$ROI_TARGET_MODE" \
+      --loss_recipe "$LOSS_RECIPE" \
+      --rate_loss_mode "$RATE_LOSS_MODE" \
+      --importance_loss_mode "$IMPORTANCE_LOSS_MODE" \
+      --importance_pos_weight_mode "$IMPORTANCE_POS_WEIGHT_MODE" \
+      --importance_pos_weight "$IMPORTANCE_POS_WEIGHT" \
+      --importance_pos_weight_max "$IMPORTANCE_POS_WEIGHT_MAX" \
+      --lambda_recon "$L_RECON" \
+      --lambda_rate "$L_RATE" \
+      --lambda_distill "$L_DISTILL" \
+      --lambda_importance "$L_IMPORTANCE" \
+      --lambda_imp_separation "$L_IMP_SEPARATION" \
+      --imp_separation_margin "$IMP_SEPARATION_MARGIN" \
+      --distill_logit_loss "$DISTILL_LOGIT_LOSS" \
+      --distill_temperature "$DISTILL_TEMPERATURE" \
+      --distill_feature_weight "$DISTILL_FEATURE_WEIGHT" \
+      --distill_logit_weight "$DISTILL_LOGIT_WEIGHT" \
+      --importance_head_type "$HEAD_TYPE" \
+      --importance_hidden_channels "$IMPORTANCE_HIDDEN_CHANNELS"
+}
+
+attempt=1
+while true; do
+  set +e
+  run_train_once
+  train_status=$?
+  set -e
+  if [[ "${train_status}" == "0" ]]; then
+    break
+  fi
+  if [[ "${attempt}" -lt "${TRAIN_MAX_RETRIES}" ]] && \
+     grep -qiE "CUDA-capable device\\(s\\) is/are busy or unavailable|CUDA error: out of memory" "logs/${LOG_PREFIX}.err"; then
+    echo "[stage3][warn] transient CUDA failure (attempt ${attempt}/${TRAIN_MAX_RETRIES}); retrying in ${TRAIN_RETRY_SLEEP_SEC}s ..."
+    sleep "${TRAIN_RETRY_SLEEP_SEC}"
+    attempt=$((attempt + 1))
+    continue
+  fi
+  echo "Error: stage3 training failed (status=${train_status}) after ${attempt} attempt(s)." >&2
+  exit "${train_status}"
+done
 
 echo "Done Stage3 task ${SLURM_ARRAY_TASK_ID} (${HEAD_TYPE})"
