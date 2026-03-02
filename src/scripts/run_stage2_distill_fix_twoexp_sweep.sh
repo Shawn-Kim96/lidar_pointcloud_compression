@@ -32,6 +32,23 @@ else
   PYTHON_ENV_DESC="python:$(command -v python)"
 fi
 
+# Ensure each Slurm task binds to its assigned GPU, avoiding shared cuda:0 collisions.
+if [[ -z "${CUDA_VISIBLE_DEVICES:-}" ]]; then
+  RAW_JOB_GPUS="${SLURM_STEP_GPUS:-${SLURM_JOB_GPUS:-}}"
+  if [[ -n "${RAW_JOB_GPUS}" ]]; then
+    FIRST_GPU="${RAW_JOB_GPUS%%,*}"
+    if [[ "${FIRST_GPU}" == *"["* ]]; then
+      FIRST_GPU="${FIRST_GPU#*[}"
+      FIRST_GPU="${FIRST_GPU%%]*}"
+    fi
+    FIRST_GPU="${FIRST_GPU//[^0-9]/}"
+    if [[ -n "${FIRST_GPU}" ]]; then
+      export CUDA_VISIBLE_DEVICES="${FIRST_GPU}"
+    fi
+  fi
+fi
+echo "[slurm-gpu] job_gpus=${SLURM_JOB_GPUS:-unset} step_gpus=${SLURM_STEP_GPUS:-unset} cuda_visible_devices=${CUDA_VISIBLE_DEVICES:-unset}"
+
 IDX=${SLURM_ARRAY_TASK_ID:-0}
 
 BACKBONE=${BACKBONE:-resnet}
