@@ -21,6 +21,9 @@
 #   SANITY_MAX_RETRIES=3
 #   SANITY_RETRY_SLEEP_SEC=20
 #   CUDA_OP_SMOKE_TEST=1
+#   SMOKE_MAX_RETRIES=3
+#   SMOKE_RETRY_SLEEP_SEC=20
+#   AUTO_SELECT_FREE_GPU=1
 #   REQUIRE_CUDA=1
 #   KITTI_MAX_SPLIT_SAMPLES=10000
 #   KITTI_MAX_TRAIN_FILES=10000
@@ -77,6 +80,9 @@ SANITY_BATCH_SIZE=${SANITY_BATCH_SIZE:-1}
 SANITY_MAX_RETRIES=${SANITY_MAX_RETRIES:-3}
 SANITY_RETRY_SLEEP_SEC=${SANITY_RETRY_SLEEP_SEC:-20}
 CUDA_OP_SMOKE_TEST=${CUDA_OP_SMOKE_TEST:-1}
+SMOKE_MAX_RETRIES=${SMOKE_MAX_RETRIES:-3}
+SMOKE_RETRY_SLEEP_SEC=${SMOKE_RETRY_SLEEP_SEC:-20}
+AUTO_SELECT_FREE_GPU=${AUTO_SELECT_FREE_GPU:-1}
 REQUIRE_CUDA=${REQUIRE_CUDA:-1}
 KITTI_MAX_SPLIT_SAMPLES=${KITTI_MAX_SPLIT_SAMPLES:-10000}
 KITTI_MAX_TRAIN_FILES=${KITTI_MAX_TRAIN_FILES:-10000}
@@ -128,6 +134,31 @@ KITTI_ROOT=${KITTI_ROOT:-${KITTI_ROOT_LINK}}
 if [[ "${KITTI_ROOT}" != /* ]]; then
   KITTI_ROOT="${ROOT_DIR}/${KITTI_ROOT}"
 fi
+
+# Bind to Slurm-assigned GPU when available; otherwise pick the freest GPU on the node.
+if [[ -z "${CUDA_VISIBLE_DEVICES:-}" ]]; then
+  RAW_JOB_GPUS="${SLURM_STEP_GPUS:-${SLURM_JOB_GPUS:-}}"
+  if [[ -n "${RAW_JOB_GPUS}" ]]; then
+    FIRST_GPU="${RAW_JOB_GPUS%%,*}"
+    if [[ "${FIRST_GPU}" == *"["* ]]; then
+      FIRST_GPU="${FIRST_GPU#*[}"
+      FIRST_GPU="${FIRST_GPU%%]*}"
+    fi
+    FIRST_GPU="${FIRST_GPU//[^0-9]/}"
+    if [[ -n "${FIRST_GPU}" ]]; then
+      export CUDA_VISIBLE_DEVICES="${FIRST_GPU}"
+    fi
+  fi
+fi
+
+if [[ -z "${CUDA_VISIBLE_DEVICES:-}" && "${AUTO_SELECT_FREE_GPU}" == "1" ]] && command -v nvidia-smi >/dev/null 2>&1; then
+  BEST_GPU="$(nvidia-smi --query-gpu=index,memory.free --format=csv,noheader,nounits 2>/dev/null | sort -t',' -k2 -nr | head -n 1 | cut -d',' -f1 | tr -d '[:space:]')"
+  if [[ "${BEST_GPU}" =~ ^[0-9]+$ ]]; then
+    export CUDA_VISIBLE_DEVICES="${BEST_GPU}"
+  fi
+fi
+
+echo "[slurm-gpu] job_gpus=${SLURM_JOB_GPUS:-unset} step_gpus=${SLURM_STEP_GPUS:-unset} cuda_visible_devices=${CUDA_VISIBLE_DEVICES:-unset}"
 
 echo "[kitti-map] python_env=${PY_ENV_DESC}"
 echo "[kitti-map] kitti_root_official=${KITTI_ROOT_OFFICIAL}"
@@ -232,8 +263,10 @@ PY
 fi
 
 if [[ "${CUDA_OP_SMOKE_TEST}" == "1" ]]; then
-  set +e
-  CUDA_SMOKE_OUT="$("${PYTHON_RUNNER[@]}" - <<'PY' 2>&1
+  smoke_attempt=1
+  while true; do
+    set +e
+    CUDA_SMOKE_OUT="$("${PYTHON_RUNNER[@]}" - <<'PY' 2>&1
 import torch
 from pcdet.ops.iou3d_nms import iou3d_nms_utils
 
@@ -247,17 +280,27 @@ props = torch.cuda.get_device_properties(0)
 print(f"[kitti-map] cuda_op_smoke_ok gpu={props.name} sm={props.major}.{props.minor}")
 PY
 )"
-  smoke_status=$?
-  set -e
-  echo "${CUDA_SMOKE_OUT}"
-  if [[ "${smoke_status}" != "0" ]]; then
+    smoke_status=$?
+    set -e
+    echo "${CUDA_SMOKE_OUT}"
+    if [[ "${smoke_status}" == "0" ]]; then
+      break
+    fi
     if grep -qi "no kernel image is available for execution on the device" <<<"${CUDA_SMOKE_OUT}"; then
-      echo "Error: OpenPCDet CUDA ops are incompatible with this GPU architecture." >&2
-      echo "Error: request compatible nodes, e.g. --gres=gpu:p100:1." >&2
+      echo "Error: OpenPCDet CUDA ops are incompatible with this node's GPU architecture." >&2
+      echo "Error: use a compatible node class or rebuild OpenPCDet CUDA ops for this architecture." >&2
+      exit 1
+    fi
+    if [[ "${smoke_attempt}" -lt "${SMOKE_MAX_RETRIES}" ]] && \
+       grep -qiE "CUDA-capable device\\(s\\) is/are busy or unavailable|CUDA error: out of memory" <<<"${CUDA_SMOKE_OUT}"; then
+      echo "[kitti-map][warn] transient CUDA smoke failure (attempt ${smoke_attempt}/${SMOKE_MAX_RETRIES}); retrying in ${SMOKE_RETRY_SLEEP_SEC}s ..."
+      sleep "${SMOKE_RETRY_SLEEP_SEC}"
+      smoke_attempt=$((smoke_attempt + 1))
+      continue
     fi
     echo "Error: CUDA op smoke test failed before sanity evaluation." >&2
     exit 1
-  fi
+  done
 fi
 
 INFO_TRAIN="${KITTI_ROOT_LINK}/kitti_infos_train.pkl"
@@ -314,8 +357,8 @@ if [[ "${RUN_ORIGINAL_SANITY}" == "1" ]]; then
       break
     fi
     if grep -qi "no kernel image is available for execution on the device" "${SANITY_LOG}"; then
-      echo "Error: sanity failed due to CUDA kernel-image mismatch (unsupported GPU arch)." >&2
-      echo "Error: submit with compatible GPU type, e.g. --gres=gpu:p100:1." >&2
+      echo "Error: sanity failed due to CUDA kernel-image mismatch on this node's GPU architecture." >&2
+      echo "Error: use a compatible node class or rebuild OpenPCDet CUDA ops for this architecture." >&2
       exit 1
     fi
     if grep -qi "CUDA-capable device(s) is/are busy or unavailable" "${SANITY_LOG}" && [[ "${attempt}" -lt "${SANITY_MAX_RETRIES}" ]]; then
