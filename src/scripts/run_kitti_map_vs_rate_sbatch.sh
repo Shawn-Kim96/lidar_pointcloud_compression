@@ -6,9 +6,6 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-# Default to P100 for OpenPCDet CUDA-op compatibility on this cluster.
-# Override at submit time if needed, e.g. `sbatch --gres=gpu:a100:1 ...`.
-#SBATCH --gres=gpu:p100:1
 #SBATCH --time=24:00:00
 #
 # Submit Track-B evaluation on a GPU node:
