@@ -28,6 +28,20 @@ DEFAULT_BITRATE_MATCH_METRIC = "bpp_entropy_mean"
 DEFAULT_BITRATE_PAIR_MAX_GAP = 0.05
 
 
+class _RunConfigLoader(yaml.SafeLoader):
+    """YAML loader for experiment config files with limited python tuple support."""
+
+
+def _construct_python_tuple(loader: yaml.Loader, node: yaml.Node) -> tuple:
+    return tuple(loader.construct_sequence(node))
+
+
+_RunConfigLoader.add_constructor(
+    "tag:yaml.org,2002:python/tuple",
+    _construct_python_tuple,
+)
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Evaluate KITTI 3D detection mAP vs compression bitrate (original vs reconstructed)."
@@ -305,7 +319,10 @@ def _load_run_config(run_dir: Path) -> Dict[str, Any]:
     if not cfg_path.exists():
         raise FileNotFoundError(f"Missing config.yaml in run_dir: {run_dir}")
     with cfg_path.open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        config = yaml.load(f, Loader=_RunConfigLoader)
+    if not isinstance(config, dict):
+        raise ValueError(f"Unexpected config structure in {cfg_path}: expected mapping, got {type(config).__name__}")
+    return config
 
 
 def _select_device(name: str) -> torch.device:
