@@ -159,6 +159,7 @@ def estimate_rate_metrics_from_aux(
     code_entropy = float("nan")
     bpp_eq = float("nan")
     bpp_entropy = float("nan")
+    bpp_true = float("nan")
 
     level_map = aux.get("level_map", None)
     codes = aux.get("codes", None)
@@ -189,6 +190,7 @@ def estimate_rate_metrics_from_aux(
         "code_entropy": code_entropy,
         "bpp_eq": bpp_eq,
         "bpp_entropy": bpp_entropy,
+        "bpp_true": bpp_true,
     }
 
 

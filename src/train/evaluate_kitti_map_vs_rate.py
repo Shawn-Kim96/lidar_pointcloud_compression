@@ -1,5 +1,6 @@
 import argparse
 import csv
+import hashlib
 import inspect
 import json
 import os
@@ -69,7 +70,13 @@ def parse_args():
         "--split",
         type=str,
         default="val",
-        help="Split hint for logging (actual split follows OpenPCDet cfg/ImageSets).",
+        help="Authoritative split name. Uses split manifest to force exact sample ids.",
+    )
+    parser.add_argument(
+        "--split_manifest",
+        type=str,
+        default="",
+        help="Optional explicit split manifest file path. Defaults to <kitti_root>/ImageSets/<split>.txt.",
     )
 
     parser.add_argument("--compression_device", type=str, default="auto", choices=["auto", "cuda", "cpu"])
@@ -97,6 +104,16 @@ def parse_args():
         type=float,
         default=DEFAULT_BITRATE_PAIR_MAX_GAP,
         help="Recorded into output metadata for downstream fairness tagging.",
+    )
+    parser.add_argument(
+        "--allow_invalid_reconstruction_fallback",
+        action="store_true",
+        help="Debug-only: allow reconstructed eval to fallback to raw points on invalid reconstruction.",
+    )
+    parser.add_argument(
+        "--allow_ap_below_gate",
+        action="store_true",
+        help="Debug-only: bypass hard AP gate failure for original detector AP3D(mod).",
     )
 
     parser.add_argument(
@@ -129,6 +146,10 @@ def _safe_float(v: Any) -> float:
         return float("nan")
 
 
+def _sha1_hex(text: str) -> str:
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()
+
+
 def _parse_run_dirs(args) -> List[Path]:
     out: List[Path] = []
     if args.run_dirs:
@@ -143,6 +164,104 @@ def _parse_run_dirs(args) -> List[Path]:
         seen.add(str(p))
         dedup.append(p)
     return dedup
+
+
+def _load_split_manifest(
+    *,
+    kitti_root: Path,
+    split: str,
+    split_manifest_arg: str,
+) -> Tuple[Path, List[str], str]:
+    if split_manifest_arg.strip():
+        manifest_path = Path(split_manifest_arg)
+    else:
+        manifest_path = kitti_root / "ImageSets" / f"{split}.txt"
+
+    if not manifest_path.exists():
+        raise FileNotFoundError(
+            f"Split manifest not found: {manifest_path}. "
+            "Provide --split_manifest or ensure KITTI ImageSets layout exists."
+        )
+    ids: List[str] = []
+    with manifest_path.open("r", encoding="utf-8") as f:
+        for line in f:
+            sid = line.strip()
+            if not sid:
+                continue
+            ids.append(_normalize_sample_id(sid))
+    if not ids:
+        raise ValueError(f"Split manifest is empty: {manifest_path}")
+    manifest_hash = _sha1_hex("\n".join(ids) + "\n")
+    return manifest_path.resolve(), ids, manifest_hash
+
+
+def _extract_lidar_idx_from_info(info: Dict[str, Any]) -> Optional[str]:
+    try:
+        pc = info.get("point_cloud", {})
+        sid = pc.get("lidar_idx", None)
+        if sid is None:
+            sid = info.get("frame_id", None)
+        if sid is None:
+            return None
+        return _normalize_sample_id(sid)
+    except Exception:
+        return None
+
+
+def _enforce_dataset_split_manifest(
+    dataset: Any,
+    split_ids: Sequence[str],
+    split_manifest_path: Path,
+) -> None:
+    if not hasattr(dataset, "kitti_infos") or not isinstance(dataset.kitti_infos, list):
+        raise RuntimeError(
+            "Dataset does not expose list-like kitti_infos; cannot enforce authoritative split manifest."
+        )
+
+    info_by_id: Dict[str, Any] = {}
+    for info in dataset.kitti_infos:
+        if not isinstance(info, dict):
+            continue
+        sid = _extract_lidar_idx_from_info(info)
+        if sid is None:
+            continue
+        if sid not in info_by_id:
+            info_by_id[sid] = info
+
+    missing = [sid for sid in split_ids if sid not in info_by_id]
+    if missing:
+        preview = ", ".join(missing[:5])
+        raise RuntimeError(
+            f"Split manifest enforcement failed: {len(missing)} sample ids missing from dataset infos "
+            f"(manifest={split_manifest_path}, first_missing=[{preview}])."
+        )
+
+    dataset.kitti_infos = [info_by_id[sid] for sid in split_ids]
+
+
+def _build_protocol_hash(
+    *,
+    args: Any,
+    cfg_file: Path,
+    ckpt_file: Path,
+    split_manifest_hash: str,
+) -> str:
+    payload = {
+        "split": str(args.split),
+        "split_manifest_hash": split_manifest_hash,
+        "openpcdet_cfg": str(cfg_file.resolve()),
+        "openpcdet_ckpt": str(ckpt_file.resolve()),
+        "eval_metric": str(args.eval_metric),
+        "img_h": int(args.img_h),
+        "img_w": int(args.img_w),
+        "fov_up_deg": float(args.fov_up_deg),
+        "fov_down_deg": float(args.fov_down_deg),
+        "range_threshold": float(args.range_threshold),
+        "teacher_ap3d_mod_car_min": float(args.teacher_ap3d_mod_car_min),
+        "bitrate_match_metric": str(args.bitrate_match_metric),
+        "bitrate_pair_max_gap": float(args.bitrate_pair_max_gap),
+    }
+    return _sha1_hex(json.dumps(payload, sort_keys=True, ensure_ascii=True))[:12]
 
 
 def _extract_state_dict(payload):
@@ -254,6 +373,9 @@ def _build_openpcdet_eval_objects(
     cfg_file: Path,
     ckpt_file: Path,
     kitti_root: Path,
+    split_name: str,
+    split_manifest_ids: Sequence[str],
+    split_manifest_path: Path,
     batch_size: int,
     workers: int,
 ):
@@ -273,6 +395,18 @@ def _build_openpcdet_eval_objects(
     if not hasattr(cfg, "DATA_CONFIG"):
         raise RuntimeError("Invalid OpenPCDet config: DATA_CONFIG not found.")
     cfg.DATA_CONFIG.DATA_PATH = str(kitti_root)
+    if hasattr(cfg.DATA_CONFIG, "DATA_SPLIT"):
+        try:
+            cfg.DATA_CONFIG.DATA_SPLIT["test"] = str(split_name)
+        except Exception:
+            pass
+    if hasattr(cfg.DATA_CONFIG, "INFO_PATH"):
+        expected_info = kitti_root / f"kitti_infos_{split_name}.pkl"
+        if expected_info.exists():
+            try:
+                cfg.DATA_CONFIG.INFO_PATH["test"] = [expected_info.name]
+            except Exception:
+                pass
 
     logger = common_utils.create_logger()
 
@@ -307,6 +441,8 @@ def _build_openpcdet_eval_objects(
             raise RuntimeError(f"Unexpected build_dataloader return length: {len(built)}")
     else:
         raise RuntimeError("build_dataloader did not return tuple/list as expected.")
+
+    _enforce_dataset_split_manifest(dataset, split_manifest_ids, split_manifest_path)
 
     # Build network with signature compatibility.
     net_sig = inspect.signature(build_network)
@@ -564,6 +700,7 @@ def _update_table_b_markdown(paper_table_path: Path, rows: Sequence[Dict[str, An
 def _evaluate_single_run(
     run_dir: Path,
     args,
+    protocol_meta: Dict[str, Any],
     original_eval_cache: Optional[Dict[str, Any]] = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
     compression_device = _select_device(args.compression_device)
@@ -589,6 +726,9 @@ def _evaluate_single_run(
             cfg_file=cfg_file,
             ckpt_file=ckpt_file,
             kitti_root=kitti_root,
+            split_name=args.split,
+            split_manifest_ids=protocol_meta["split_ids"],
+            split_manifest_path=Path(protocol_meta["split_manifest"]),
             batch_size=args.batch_size,
             workers=args.workers,
         )
@@ -664,9 +804,14 @@ def _evaluate_single_run(
             "model_family": model_family,
             "run_dir": str(run_dir),
             "mode": "original",
+            "split": str(args.split),
+            "split_manifest": str(protocol_meta["split_manifest"]),
+            "split_manifest_hash": str(protocol_meta["split_manifest_hash"]),
+            "protocol_hash": str(protocol_meta["protocol_hash"]),
             "frames": int(original_eval_cache["frames"]),
             "bpp_entropy_mean": float("nan"),
             "bpp_eq_mean": float("nan"),
+            "true_bpp": float("nan"),
             "ap3d_car_easy": _safe_float(original_eval_cache["ap3d_car_easy"]),
             "ap3d_car_mod": _safe_float(original_eval_cache["ap3d_car_mod"]),
             "ap3d_car_hard": _safe_float(original_eval_cache["ap3d_car_hard"]),
@@ -674,23 +819,33 @@ def _evaluate_single_run(
             "ap3d_cyc_mod": _safe_float(original_eval_cache["ap3d_cyc_mod"]),
             "map3d_mod_mean": _safe_float(original_eval_cache["map3d_mod_mean"]),
             "map_drop_vs_original": 0.0,
+            "fallback_count": 0,
             "fairness_tag": "reference_original",
         }
     )
 
     # Teacher quality gate (on original detector AP).
     if _safe_float(original_eval_cache["ap3d_car_mod"]) < float(args.teacher_ap3d_mod_car_min):
-        print(
-            "[GATE] teacher_ap3d_mod_car below threshold: "
-            f"{_safe_float(original_eval_cache['ap3d_car_mod']):.3f} < {float(args.teacher_ap3d_mod_car_min):.3f}. "
-            "Prepare fine-tune branch before final distill claims."
+        gate_msg = (
+            "teacher_ap3d_mod_car below threshold: "
+            f"{_safe_float(original_eval_cache['ap3d_car_mod']):.3f} < {float(args.teacher_ap3d_mod_car_min):.3f}."
         )
+        if args.allow_ap_below_gate:
+            print(f"[WARN][GATE] {gate_msg} Proceeding due to --allow_ap_below_gate.")
+        else:
+            raise RuntimeError(
+                f"[GATE] {gate_msg} Failing run. "
+                "Use --allow_ap_below_gate only for debug/non-claim runs."
+            )
 
     # Reconstructed mode.
     cfg, dataset, dataloader, _, detector_model, load_data_to_gpu = _build_openpcdet_eval_objects(
         cfg_file=cfg_file,
         ckpt_file=ckpt_file,
         kitti_root=kitti_root,
+        split_name=args.split,
+        split_manifest_ids=protocol_meta["split_ids"],
+        split_manifest_path=Path(protocol_meta["split_manifest"]),
         batch_size=args.batch_size,
         workers=args.workers,
     )
@@ -702,10 +857,12 @@ def _evaluate_single_run(
     original_get_lidar = dataset.get_lidar
     recon_cache: Dict[str, np.ndarray] = {}
     rate_cache: Dict[str, Dict[str, float]] = {}
+    fallback_count = 0
     pc_range = np.asarray(getattr(cfg.DATA_CONFIG, "POINT_CLOUD_RANGE", [0, -40, -3, 70.4, 40, 1]), dtype=np.float32)
     x_min, y_min, z_min, x_max, y_max, z_max = [float(v) for v in pc_range.tolist()]
 
     def _recon_get_lidar(sample_idx):
+        nonlocal fallback_count
         sid = _normalize_sample_id(sample_idx)
         if sid in recon_cache:
             return recon_cache[sid]
@@ -723,18 +880,32 @@ def _evaluate_single_run(
             range_threshold=float(args.range_threshold),
             uniform_bits_fallback=uniform_bits,
         )
-        if recon_points is not None and recon_points.size > 0:
+        invalid_reason = ""
+        if recon_points is None or recon_points.size == 0:
+            invalid_reason = "empty_reconstruction"
+        else:
             xyz = recon_points[:, :3]
             in_range = (
                 (xyz[:, 0] >= x_min) & (xyz[:, 0] <= x_max) &
                 (xyz[:, 1] >= y_min) & (xyz[:, 1] <= y_max) &
                 (xyz[:, 2] >= z_min) & (xyz[:, 2] <= z_max)
             )
-            if not np.any(in_range):
+            recon_points = recon_points[in_range]
+            if recon_points.size == 0:
+                invalid_reason = "all_points_out_of_range"
+
+        if invalid_reason:
+            if args.allow_invalid_reconstruction_fallback:
+                fallback_count += 1
                 recon_points = np.asarray(raw_points, dtype=np.float32)
-        if recon_points is None or recon_points.size == 0:
-            # Keep detector path robust when reconstruction yields no valid points.
-            recon_points = np.asarray(raw_points, dtype=np.float32)
+            else:
+                raise RuntimeError(
+                    "Invalid reconstruction encountered at sample "
+                    f"{sid} (reason={invalid_reason}). "
+                    "Failing fast per protocol. "
+                    "Use --allow_invalid_reconstruction_fallback only for debug/non-claim runs."
+                )
+
         recon_cache[sid] = recon_points.astype(np.float32)
         rate_cache[sid] = rate_metrics
         return recon_cache[sid]
@@ -746,6 +917,8 @@ def _evaluate_single_run(
     frame_idx = 0
     total_bpp_entropy = 0.0
     total_bpp_eq = 0.0
+    total_true_bpp = 0.0
+    true_bpp_count = 0
     detector_device = next(detector_model.parameters()).device
 
     for batch_dict in dataloader:
@@ -769,10 +942,14 @@ def _evaluate_single_run(
             rate = rate_cache.get(_normalize_sample_id(sid), {})
             bpp_entropy = _safe_float(rate.get("bpp_entropy"))
             bpp_eq = _safe_float(rate.get("bpp_eq"))
+            true_bpp = _safe_float(rate.get("bpp_true"))
             if bpp_entropy == bpp_entropy:
                 total_bpp_entropy += bpp_entropy
             if bpp_eq == bpp_eq:
                 total_bpp_eq += bpp_eq
+            if true_bpp == true_bpp:
+                total_true_bpp += true_bpp
+                true_bpp_count += 1
 
             detail_rows.append(
                 {
@@ -808,6 +985,7 @@ def _evaluate_single_run(
 
     bpp_entropy_mean = total_bpp_entropy / frame_count if frame_count > 0 else float("nan")
     bpp_eq_mean = total_bpp_eq / frame_count if frame_count > 0 else float("nan")
+    true_bpp_mean = total_true_bpp / true_bpp_count if true_bpp_count > 0 else float("nan")
     map_drop = _safe_float(original_eval_cache["map3d_mod_mean"]) - map_mod
 
     summary_rows.append(
@@ -815,9 +993,14 @@ def _evaluate_single_run(
             "model_family": model_family,
             "run_dir": str(run_dir),
             "mode": "reconstructed",
+            "split": str(args.split),
+            "split_manifest": str(protocol_meta["split_manifest"]),
+            "split_manifest_hash": str(protocol_meta["split_manifest_hash"]),
+            "protocol_hash": str(protocol_meta["protocol_hash"]),
             "frames": int(frame_count),
             "bpp_entropy_mean": bpp_entropy_mean,
             "bpp_eq_mean": bpp_eq_mean,
+            "true_bpp": true_bpp_mean,
             "ap3d_car_easy": car_easy,
             "ap3d_car_mod": car_mod,
             "ap3d_car_hard": car_hard,
@@ -825,13 +1008,15 @@ def _evaluate_single_run(
             "ap3d_cyc_mod": cyc_mod,
             "map3d_mod_mean": map_mod,
             "map_drop_vs_original": map_drop,
+            "fallback_count": int(fallback_count),
             "fairness_tag": "unmatched",
         }
     )
 
     print(
         f"[{run_dir.name}] original_map3d_mod={_safe_float(original_eval_cache['map3d_mod_mean']):.3f} "
-        f"recon_map3d_mod={map_mod:.3f} bpp_entropy={bpp_entropy_mean:.4f}"
+        f"recon_map3d_mod={map_mod:.3f} bpp_entropy={bpp_entropy_mean:.4f} "
+        f"fallback_count={int(fallback_count)}"
     )
     return summary_rows, detail_rows, original_eval_cache
 
@@ -870,6 +1055,24 @@ def main():
     if not ckpt_file.exists():
         raise FileNotFoundError(f"OpenPCDet ckpt not found: {ckpt_file}")
 
+    split_manifest_path, split_ids, split_manifest_hash = _load_split_manifest(
+        kitti_root=kitti_root,
+        split=str(args.split),
+        split_manifest_arg=str(args.split_manifest),
+    )
+    protocol_hash = _build_protocol_hash(
+        args=args,
+        cfg_file=cfg_file,
+        ckpt_file=ckpt_file,
+        split_manifest_hash=split_manifest_hash,
+    )
+    protocol_meta: Dict[str, Any] = {
+        "split_manifest": str(split_manifest_path),
+        "split_manifest_hash": split_manifest_hash,
+        "protocol_hash": protocol_hash,
+        "split_ids": split_ids,
+    }
+
     # Fail fast before long run.
     _ensure_openpcdet_importable()
 
@@ -883,6 +1086,7 @@ def main():
         rows_s, rows_d, original_cache = _evaluate_single_run(
             run_dir=run_dir,
             args=args,
+            protocol_meta=protocol_meta,
             original_eval_cache=original_cache,
         )
         summary_all.extend(rows_s)
@@ -892,9 +1096,14 @@ def main():
         "model_family",
         "run_dir",
         "mode",
+        "split",
+        "split_manifest",
+        "split_manifest_hash",
+        "protocol_hash",
         "frames",
         "bpp_entropy_mean",
         "bpp_eq_mean",
+        "true_bpp",
         "ap3d_car_easy",
         "ap3d_car_mod",
         "ap3d_car_hard",
@@ -902,6 +1111,7 @@ def main():
         "ap3d_cyc_mod",
         "map3d_mod_mean",
         "map_drop_vs_original",
+        "fallback_count",
         "fairness_tag",
     ]
     detail_fields = [
@@ -927,6 +1137,11 @@ def main():
         f"teacher_ap3d_mod_car_min={float(args.teacher_ap3d_mod_car_min):.3f}, "
         f"bitrate_match_metric={args.bitrate_match_metric}, "
         f"bitrate_pair_max_gap={float(args.bitrate_pair_max_gap):.3f}"
+    )
+    print(
+        "Protocol metadata: "
+        f"split={args.split} split_manifest={split_manifest_path} "
+        f"split_manifest_hash={split_manifest_hash} protocol_hash={protocol_hash}"
     )
 
     if args.update_paper_table:

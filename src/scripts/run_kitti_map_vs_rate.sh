@@ -28,10 +28,13 @@
 #   WORKERS=0
 #   MAX_FRAMES=0
 #   SPLIT=val
+#   SPLIT_MANIFEST=/path/to/ImageSets/val.txt
 #   EVAL_METRIC=kitti
 #   TEACHER_AP3D_MOD_CAR_MIN=55.0
 #   BITRATE_MATCH_METRIC=bpp_entropy_mean
 #   BITRATE_PAIR_MAX_GAP=0.05
+#   ALLOW_INVALID_RECON_FALLBACK=0   (debug only)
+#   ALLOW_AP_BELOW_GATE=0            (debug only)
 #   SUMMARY_CSV=notebooks/kitti_map_vs_rate_summary.csv
 #   DETAIL_CSV=notebooks/kitti_map_vs_rate_detail.csv
 #   DETECTOR_PAIR_CSV=notebooks/kitti_map_vs_rate_pairs.csv
@@ -242,10 +245,13 @@ BATCH_SIZE=${BATCH_SIZE:-1}
 WORKERS=${WORKERS:-0}
 MAX_FRAMES=${MAX_FRAMES:-0}
 SPLIT=${SPLIT:-val}
+SPLIT_MANIFEST=${SPLIT_MANIFEST:-}
 EVAL_METRIC=${EVAL_METRIC:-kitti}
 TEACHER_AP3D_MOD_CAR_MIN=${TEACHER_AP3D_MOD_CAR_MIN:-55.0}
 BITRATE_MATCH_METRIC=${BITRATE_MATCH_METRIC:-bpp_entropy_mean}
 BITRATE_PAIR_MAX_GAP=${BITRATE_PAIR_MAX_GAP:-0.05}
+ALLOW_INVALID_RECON_FALLBACK=${ALLOW_INVALID_RECON_FALLBACK:-0}
+ALLOW_AP_BELOW_GATE=${ALLOW_AP_BELOW_GATE:-0}
 SUMMARY_CSV=${SUMMARY_CSV:-notebooks/kitti_map_vs_rate_summary.csv}
 DETAIL_CSV=${DETAIL_CSV:-notebooks/kitti_map_vs_rate_detail.csv}
 DETECTOR_PAIR_CSV=${DETECTOR_PAIR_CSV:-notebooks/kitti_map_vs_rate_pairs.csv}
@@ -304,6 +310,19 @@ if [[ "${UPDATE_PAPER_TABLE}" == "1" ]]; then
   TABLE_FLAG=(--update_paper_table)
 fi
 
+SPLIT_MANIFEST_FLAG=()
+if [[ -n "${SPLIT_MANIFEST}" ]]; then
+  SPLIT_MANIFEST_FLAG=(--split_manifest "${SPLIT_MANIFEST}")
+fi
+
+DEBUG_EVAL_FLAGS=()
+if [[ "${ALLOW_INVALID_RECON_FALLBACK}" == "1" ]]; then
+  DEBUG_EVAL_FLAGS+=(--allow_invalid_reconstruction_fallback)
+fi
+if [[ "${ALLOW_AP_BELOW_GATE}" == "1" ]]; then
+  DEBUG_EVAL_FLAGS+=(--allow_ap_below_gate)
+fi
+
 "${PYTHON_RUNNER[@]}" src/train/evaluate_kitti_map_vs_rate.py \
   --kitti_root "${KITTI_ROOT}" \
   --run_dirs_csv "${RUN_DIRS}" \
@@ -313,10 +332,12 @@ fi
   --workers "${WORKERS}" \
   --max_frames "${MAX_FRAMES}" \
   --split "${SPLIT}" \
+  "${SPLIT_MANIFEST_FLAG[@]}" \
   --eval_metric "${EVAL_METRIC}" \
   --teacher_ap3d_mod_car_min "${TEACHER_AP3D_MOD_CAR_MIN}" \
   --bitrate_match_metric "${BITRATE_MATCH_METRIC}" \
   --bitrate_pair_max_gap "${BITRATE_PAIR_MAX_GAP}" \
+  "${DEBUG_EVAL_FLAGS[@]}" \
   --output_summary_csv "${SUMMARY_CSV}" \
   --output_detail_csv "${DETAIL_CSV}" \
   "${TABLE_FLAG[@]}"
