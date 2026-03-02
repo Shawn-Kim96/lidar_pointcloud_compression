@@ -6,7 +6,9 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --gres=gpu:1
+# Default to P100 for OpenPCDet CUDA-op compatibility on this cluster.
+# Override at submit time if needed, e.g. `sbatch --gres=gpu:a100:1 ...`.
+#SBATCH --gres=gpu:p100:1
 #SBATCH --time=24:00:00
 #
 # Submit Track-B evaluation on a GPU node:
@@ -91,6 +93,8 @@ echo "openpcdet_ckpt: ${OPENPCDET_CKPT}"
 echo "workers: ${WORKERS}"
 echo "max_frames: ${MAX_FRAMES}"
 echo "eval_metric: ${EVAL_METRIC}"
+echo "slurm_job_nodelist: ${SLURM_JOB_NODELIST:-n/a}"
+echo "slurm_job_gres: ${SLURM_JOB_GRES:-n/a}"
 echo "started_at: $(date '+%Y-%m-%d %H:%M:%S %Z')"
 echo "============================================================"
 
@@ -112,4 +116,3 @@ DETECTOR_PAIR_CSV="${DETECTOR_PAIR_CSV}" \
 "${BASH_RUNNER[@]}" src/scripts/run_kitti_map_vs_rate.sh
 
 echo "[kitti-map-sbatch] done"
-

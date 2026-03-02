@@ -20,6 +20,7 @@
 #   SANITY_BATCH_SIZE=1
 #   SANITY_MAX_RETRIES=3
 #   SANITY_RETRY_SLEEP_SEC=20
+#   CUDA_OP_SMOKE_TEST=1
 #   REQUIRE_CUDA=1
 #   KITTI_MAX_SPLIT_SAMPLES=10000
 #   KITTI_MAX_TRAIN_FILES=10000
@@ -75,6 +76,7 @@ RUN_ORIGINAL_SANITY=${RUN_ORIGINAL_SANITY:-1}
 SANITY_BATCH_SIZE=${SANITY_BATCH_SIZE:-1}
 SANITY_MAX_RETRIES=${SANITY_MAX_RETRIES:-3}
 SANITY_RETRY_SLEEP_SEC=${SANITY_RETRY_SLEEP_SEC:-20}
+CUDA_OP_SMOKE_TEST=${CUDA_OP_SMOKE_TEST:-1}
 REQUIRE_CUDA=${REQUIRE_CUDA:-1}
 KITTI_MAX_SPLIT_SAMPLES=${KITTI_MAX_SPLIT_SAMPLES:-10000}
 KITTI_MAX_TRAIN_FILES=${KITTI_MAX_TRAIN_FILES:-10000}
@@ -229,6 +231,35 @@ PY
   fi
 fi
 
+if [[ "${CUDA_OP_SMOKE_TEST}" == "1" ]]; then
+  set +e
+  CUDA_SMOKE_OUT="$("${PYTHON_RUNNER[@]}" - <<'PY' 2>&1
+import torch
+from pcdet.ops.iou3d_nms import iou3d_nms_utils
+
+if not torch.cuda.is_available():
+    raise SystemExit("CUDA unavailable during smoke test")
+
+boxes_a = torch.tensor([[0.0, 0.0, 0.0, 1.6, 3.9, 1.5, 0.0]], device="cuda", dtype=torch.float32)
+boxes_b = torch.tensor([[0.1, 0.1, 0.0, 1.6, 3.9, 1.5, 0.0]], device="cuda", dtype=torch.float32)
+_ = iou3d_nms_utils.boxes_iou3d_gpu(boxes_a, boxes_b)
+props = torch.cuda.get_device_properties(0)
+print(f"[kitti-map] cuda_op_smoke_ok gpu={props.name} sm={props.major}.{props.minor}")
+PY
+)"
+  smoke_status=$?
+  set -e
+  echo "${CUDA_SMOKE_OUT}"
+  if [[ "${smoke_status}" != "0" ]]; then
+    if grep -qi "no kernel image is available for execution on the device" <<<"${CUDA_SMOKE_OUT}"; then
+      echo "Error: OpenPCDet CUDA ops are incompatible with this GPU architecture." >&2
+      echo "Error: request compatible nodes, e.g. --gres=gpu:p100:1." >&2
+    fi
+    echo "Error: CUDA op smoke test failed before sanity evaluation." >&2
+    exit 1
+  fi
+fi
+
 INFO_TRAIN="${KITTI_ROOT_LINK}/kitti_infos_train.pkl"
 INFO_VAL="${KITTI_ROOT_LINK}/kitti_infos_val.pkl"
 if [[ "${REBUILD_KITTI_INFOS}" == "1" || ! -f "${INFO_TRAIN}" || ! -f "${INFO_VAL}" ]]; then
@@ -281,6 +312,11 @@ if [[ "${RUN_ORIGINAL_SANITY}" == "1" ]]; then
     set -e
     if [[ "${sanity_status}" == "0" ]]; then
       break
+    fi
+    if grep -qi "no kernel image is available for execution on the device" "${SANITY_LOG}"; then
+      echo "Error: sanity failed due to CUDA kernel-image mismatch (unsupported GPU arch)." >&2
+      echo "Error: submit with compatible GPU type, e.g. --gres=gpu:p100:1." >&2
+      exit 1
     fi
     if grep -qi "CUDA-capable device(s) is/are busy or unavailable" "${SANITY_LOG}" && [[ "${attempt}" -lt "${SANITY_MAX_RETRIES}" ]]; then
       echo "[kitti-map][warn] sanity failed due to transient CUDA busy/unavailable, retrying in ${SANITY_RETRY_SLEEP_SEC}s ..."
