@@ -1,0 +1,1013 @@
+                                                  FLiCR: A Fast and Lightweight LiDAR Point
+                                                     Cloud Compression Based on Lossy RI
+                                                                    Jin Heo                                 Christopher Phillips                            Ada Gavrilovska
+                                                    Georgia Institute of Technology                                 Adeia                            Georgia Institute of Technology
+                                                       Atlanta, Georgia, USA                              Hartwell, Georgia, USA                        Atlanta, Georgia, USA
+                                                          jheo33@gatech.edu                               chris.phillips@adeia.com                         ada@cc.gatech.edu
+
+
+
+                                            Abstract—Light detection and ranging (LiDAR) sensors are                            models of LiDAR were too expensive and large in size [1].
+arXiv:2307.15005v1 [cs.MM] 27 Jul 2023
+
+
+
+
+                                         becoming available on modern mobile devices and provide a                              However, as LiDAR technology advances, the sensors are be-
+                                         3D sensing capability. This new capability is beneficial for                           coming smaller and affordable, while maintaining their sensing
+                                         perceptions in various use cases, but it is challenging for resource-
+                                         constrained mobile devices to use the perceptions in real-time                         performance even at lower power usage. Recently, Velodyne
+                                         because of their high computational complexity. In this context,                       Lidar released a palm-size LiDAR sensor, Velabit [2], for
+                                         edge computing can be used to enable LiDAR online perceptions,                         around $100, Intel RealSense camera [3] has a tiny LiDAR
+                                         but offloading the perceptions on the edge server requires a low-                      sensor, as do the latest Apple iPhone and iPad [4] devices.
+                                         latency, lightweight, and efficient compression due to the large                       As LiDAR becomes cost-effective and smaller in size, there
+                                         volume of LiDAR point clouds data.
+                                            This paper presents FLiCR, a fast and lightweight LiDAR                             would be more opportunities for mobile devices to leverage
+                                         point cloud compression method for enabling edge-assisted online                       perceptions of this new sense in diverse use cases.
+                                         perceptions. FLiCR is based on range images (RI) as an interme-                           Although LiDAR technology is becoming available on
+                                         diate representation (IR), and dictionary coding for compressing                       mobile devices, there remain challenges in leveraging Li-
+                                         RIs. FLiCR achieves its benefits by leveraging lossy RIs, and we                       DAR perceptions for real-time use cases. As discussed in
+                                         show the efficiency of bytestream compression is largely improved
+                                         with quantization and subsampling. In addition, we identify the                        prior LiDAR perception research [5]–[9], the computational
+                                         limitation of current quality metrics for presenting the entropy                       complexities of LiDAR perceptions are very high because
+                                         of a point cloud, and introduce a new metric that reflects                             these algorithms process unstructured 3D data. Even with
+                                         both point-wise and entropy-wise qualities for lossy IRs. The                          these highly optimized algorithms, high-end processors and
+                                         evaluation results show FLiCR is more suitable for edge-assisted                       GPUs are required to make them run in real-time. This
+                                         real-time perceptions than the existing LiDAR compressions, and
+                                         we demonstrate the effectiveness of our compression and metric                         poses limitations to enabling real-time LiDAR perception on
+                                         with the evaluations on 3D object detection and LiDAR SLAM.                            resource-constrained (including by battery lifetime) mobile
+                                                                                                                                devices which lack such high-end hardware.
+                                           Index Terms—lidar, lidar point cloud, lidar point cloud com-                            Edge computing is a technology that can relieve such issues
+                                         pression, 3D point cloud compression, remote lidar perceptions,                        and enable computationally intensive perceptions for mobile
+                                         real-time perception service, range image compression, edge                            users with commodity hardware. The edge (or cloudlet) is
+                                         computing
+                                                                                                                                located at the edge of the network and close to the end users in
+                                                                                                                                the multi-tier cloud. End users can utilize edge resources effec-
+                                                                    I. I NTRODUCTION                                            tively for storing and processing data on nearby edge servers
+                                            Light detection and ranging (LiDAR) sensors have been                               accessible via low-latency and high-bandwidth networks such
+                                         used in robotics and autonomous vehicles for robust and                                as 5G [10]. There has been research on offloading image-based
+                                         accurate 3D sensing. The 3D point clouds from LiDAR sensors                            real-time perceptions on the edge [11]–[13]. When remotely
+                                         are used in perception tasks for understanding real-world                              running the perceptions, a sequence of images is transmitted
+                                         contexts, such as 3D object detection and tracking, and LiDAR                          to the edge server in real-time. In such settings, efficient and
+                                         simultaneous localization and mapping (LiDAR SLAM). A                                  low-latency image compression is essential because of the
+                                         LiDAR sensor has advantages over image sensors as it can                               large size of the raw images. Fortunately, image compression
+                                         provide environmental information in 3D with higher accuracy                           algorithms have been extensively studied by both industry and
+                                         and is more robust to challenging weather and light conditions.                        academia [14]–[16], and the accelerators for such standard
+                                         Previously, despite the benefits of LiDAR sensors, only a few                          codecs are broadly available even on mobile devices, given
+                                         device platforms were equipped with them because the early                             the popularity of video streaming [17]–[19]. These existing
+                                                                                                                                video codecs with accelerators enable the online perceptions
+                                            © 2022 IEEE. Personal use of this material is permitted. Permission from            on the remote edge servers.
+                                         IEEE must be obtained for all other uses, in any current or future media,                 While offloading image-based perceptions takes advantage
+                                         including reprinting/republishing this material for advertising or promotional
+                                         purposes, creating new collective works, for resale or redistribution to servers       of the available codecs and accelerators for real-time video
+                                         or lists, or reuse of any copyrighted component of this work in other works.           streaming, there are challenges to enabling edge-assisted on-
+
+
+
+                                                                                                                            1
+line LiDAR perceptions due to the lack of such infrastructure            ePSNR captures the quality impact of the lossyness introduced
+for LiDAR point cloud compression. LiDAR sensors generate                by FLiCR, enabling future system support to dynamically
+unstructured 3D point clouds, and their volume is too large              exercise the latency-performance tradeoff it exposes. In sum-
+to send them as raw data. As an example, the points per                  mary, we make the following contributions:
+scan of the KITTI dataset [20] are about 120,000 of 2 MB,                 • We identify the requirements of LiDAR point cloud com-
+and streaming the raw sensor data at 60 frames per second                  pression methods for edge-assisted online perceptions and
+(FPS) needs a bandwidth of 120 Mbps. In addition to the                    conduct a thorough analysis on the limitations of the state-
+high bandwidth usage, transmitting a large amount of data not              of-the-art technologies.
+only causes higher network loads on the backend middleboxes,              • We propose FLiCR, a lightweight, low-latency, and effi-
+resulting in additional transmission delays, but also reduces the          cient compression method that combines use of lossy RI
+lifetime of a mobile device by consuming its battery [21]–[23].            and lossless dictionary coder, and compare it to the existing
+In this context, an effective point cloud compression is crucial,          methods.
+but it is required to be low-latency and lightweight. Since               • We point out the limitations of the current quality metrics
+the responsiveness of online perceptions is determined by the              for point clouds in terms of the entropy loss and propose
+end-to-end latency, high compression latency can introduce                 ePSNR as a new single-number metric reflecting both point-
+discrepancy between the real environment and the perception                wise and entropy-wise qualities.
+results [24]. The compression time should be sufficiently small           • We demonstrate the benefits of our compression method
+not to compromise the benefit of the reduced perception                    and metric on two downstream perception tasks, 3D object
+processing time on the server. Moreover, the compression                   detection and LiDAR SLAM.
+should be lightweight to run on mobile devices.
+   There are prior efforts to improve 3D point cloud compres-                                    II. BACKGROUND
+sion, but their primary focus is on achieving higher compres-            3D Point Clouds. A 3D point cloud is a set of points in the
+sion ratio while preserving the original content qualities [25]–         3D space. Point clouds can be categorized into two categories
+[31]. Even with real-time compression methods, the latency               by their characteristics: structured and unstructured. The un-
+ranges of previous methods are too high to enable online                 structured (raw) point cloud is a sequence of the coordinate
+perceptions, or they require high-end processors with GPUs               values of 3D points (usually x, y, z in a Cartesian coordinate
+for low latency [32]–[37]. In short, the effectiveness of existing       system), optionally with other attributes such as reflection
+point cloud compression methods is limited when considering              intensities. The structured point cloud is a point set organized
+mobile devices, which poses a challenge to enabling edge-                with geometric or hierarchical structure contexts including
+assisted LiDAR perceptions.                                              meshes, octrees, etc. A LiDAR point cloud is an unstructured
+   For enabling edge-assisted LiDAR perceptions to real-time             point cloud directly captured from LiDAR sensors.
+applications, we propose FLiCR, a lightweight and low-                   Unstructured Point Cloud Compression. There are di-
+latency point cloud compression method based on the range-               verse existing compression methods, but a common thread
+image (RI) representation and a lossless compression algo-               across them is to convert raw point clouds into structured
+rithm. While previous research on RI compressions utilizes               intermediate representations (IRs) and apply compression al-
+only the quantization of the point bit precision with lossless           gorithms to the IRs, as shown in Figure 1. The compres-
+RI mapping [26]–[29], [32], [33], we explore the optimization            sion process is tied to each IR, and the commonly used
+opportunities of lossy RIs with subsampling for reducing the             IRs are k-d tree, octree, mesh, and range image. Figure 2
+data size and improving the compression efficiency. The idea is          shows different IR visualizations from a raw point cloud.
+that compression algorithms such as dictionary coding, which             Compression methods are categorized into geometry-based or
+use shorter references to repetitive features, would become              image-based compression, based on the used IRs. Geometry-
+more effective since they operate with a more limited data               based compression uses the tree structures or mesh [25], [30],
+representation space. Subsampling of mapped points leads to              [34], [38]–[42], and the image-based compression maps the
+point loss, and it is criticial to understand how this translates
+to reduction in end-to-end perception quality. We demonstrate
+the limitations of existing quality metrics to represent this                    Original Point Cloud
+total information loss because their designs are only concerned
+                                                                                                            PC to IR   IR Encode
+with point-to-point distances. Then, we propose a unified
+metric, ePSNR, that captures both point-wise and entropy-
+wise point cloud qualities, by extending the current PSNR
+                                                                                Reconstructed Point Cloud
+with a probability function of entropy estimation.
+   We evaluate FLiCR and ePSNR with the current compres-
+                                                                                                            IR to PC   IR Decode
+sion methods and metrics and different LiDAR perception use
+cases. In our results, FLiCR achieves up to 5.3× improvement
+in end-to-end compression latency on mobile devices and                  Fig. 1: The general processing steps of the existing point cloud
+12.6× in compression ratio compared to Google Draco, and                 compression methods.
+
+
+
+                                                                     2
+                       (a) A raw point cloud.
+                                                                        (a) The object detection result                                     (b) The object detection result
+                                                                        without the discrepancy latency.                                    with the discrepancy latency of
+                                                                                                                                            300 ms.
+                                                                        Fig. 3: The simulated results of the online perceptions with Mask
+                                                                        R-CNN [43] and Argoverse [45].
+                     (b) A mesh representation.
+                                                                                                          45                                                       30
+                                                                                                                   Mask R-CNN: AP
+                                                                                                          40       Mask R-CNN: Mismatches
+                                                                                                                                                                   25
+                                                                                                          35
+
+
+
+
+                                                                              AP with IoU threshold 0.5
+
+
+
+
+                                                                                                                                                                       # of Mismatched Objects
+                                                                                                          30                                                       20
+
+                                                                                                          25
+                    (c) An octree representation.                                                                                                                  15
+                                                                                                          20
+                                                                                                          15                                                       10
+
+                                                                                                          10                                                       5
+                         (d) A range image.                                                               5
+Fig. 2: The visualizations of a LiDAR point cloud from KITTI [20]
+dataset with different IRs.                                                                                    0         30         50       100       200   300
+                                                                                                                              Discrepancy Latency (ms)
+
+                                                                        Fig. 4: The measured AP and number of mismatches of the online
+point clouds into 2D frames [26], [27], [32], [33], [36]. The           object detection with different discrepancy latencies.
+geometry-based compressions code their IRs and compress the
+coded IRs, and the image-based approaches utilize the existing
+codecs or present their own techniques for compressing the              without discrepancy latencies. For object detection, we use
+mapped images. More details of the existing methods appear              Mask R-CNN [43] pre-trained with the dataset of Microsoft
+in Section VIII.                                                        COCO [44]. Then, the detection model runs with an au-
+                                                                        tonomous driving dataset, Argoverse [45], and we measure
+       III. C HALLENGES WITH L I DAR P OINT C LOUD                      the metrics with different discrepancy latencies. Without the
+                     C OMPRESSION                                       discrepancy latency, the perception model detects ∼36% of
+Reducing discrepancy latency. For online perception, the                objects to the ground truth. As the latency increases, the AP
+end-to-end latency of the processing pipeline has a major               result starts to decrease with the increased number of mis-
+impact on performance as it affects the application respon-             matched objects. These results show the latency governs the
+siveness to changes in the real-world environment [24]. For             perception performance and there is the latency-performance
+instance, if the perception result of the data captured at t0 is        tradeoff of online perceptions.
+available at t1 , there would be a discrepancy between the result          In addition to the perception algorithm, there are additional
+and real world with the changes during the time from t0 to t1 .         components in the processing pipeline which introduce latency
+Figure 3 is the screenshot of the simulated online perception           when offloading the LiDAR perceptions on the edge: data
+results with and without 300 ms of the discrepancy latency              compression and network transportation. The overheads from
+in the object detection task. Without the discrepancy latency,          these steps contribute to the discrepancy latency, and the
+all real-world objects are aligned with the detection results as        benefit of the reduced processing time of a perception can
+Figure 3a. However, with the latency, the perception results are        be compromised by them. As shown in Figure 4, even with
+not correctly corresponding to the real-world objects because           30 ms of discrepancy latency, AP decreases by ∼28% of the
+of the discrepancies as Figure 3b.                                      result without the latency. With 100 ms delay, it becomes
+   In Figure 4, we show the impact of different discrepancy             half of the result without delay. Furthermore, the number of
+latencies between the real world and the perception results             mismatched objects soars with the higher latencies. So, along
+on the performance of object detection. We use the metrics              with the application of edge computing to reduce the network
+for streaming perceptions [24] – the average precision (AP)             latency, a lightweight and low-latency LiDAR point cloud
+with intersection over union (IoU) threshold 0.5, and the               compression method is essential to enable edge-assisted online
+number of mismatched objects between the results with and               LiDAR perceptions for resource-constrained mobile users.
+
+
+
+                                                                    3
+TABLE I: The benchmark results of the existing compression methods for 3D point clouds. The results in parentheses are on
+the Jetson AGX.
+                             Methods
+                                          RLE        Dict Coding [46]      Google Draco [42]        MPEG G-PCC [25]           PCL [38]      RT-ST [32]
+ Metrics
+ Compression Ratio                        0.54            1.67                   17.05                    8.76                    5.72         15.96
+ PSNR (dB)                              Lossless        Lossless                 67.29                   78.43                   89.77         63.18
+ CD (cm)                                Lossless        Lossless                 0.267                   0.184                   0.001          3.07
+ Enc Time (ms)                         40.1 (42.4)     40.5 (75.4)            21.1 (48.4)              598 (741)              72.1 (198)    97.7 (240)
+ Dec Time (ms)                         17.9 (15.8)     13.8 (33.7)            9.44 (18.6)              204 (265)              55.4 (153)    15.2 (34.8)
+ Enc Energy Usage (J)                  1.18 (0.11)     1.19 (0.23)            0.83 (0.14)             15.35 (2.41)            2.05 (0.46)   2.63 (0.59)
+ Dec Energy Usage (J)                  0.51 (0.04)     0.39 (0.08)            0.36 (0.05)             5.56 (0.66)             1.54 (0.36)   0.57 (0.12)
+
+
+
+Limitations of existing compression methods. Given                       energy usage versus Google Draco.
+the popularity of 3D point cloud data, there are existing                   Based on the results in Table I, Google Draco seems the
+technologies for LiDAR point cloud compression: Google                   best option to meet the requirements, but it causes about 60
+Draco [42], MPEG Geometry based point cloud compres-                     ms (∼50 ms for encoding and ∼10 ms for decoding) of the
+sion (G-PCC) [25], Point Cloud Library (PCL) [38] octree                 compression cost when the user device is Jetson and our desk-
+compression, and the real-time spatio-temporal (RT-ST) com-              top is a server. Since there are additional delays from network
+pression by Feng et al. [32]. Google Draco is based on k-d               transmission and algorithm processing, the discrepancy latency
+tree, PCL and G-PCC are on octree, and RT-ST compresses                  of the whole pipeline will be too high given a compression
+range images (RIs) of 3D point clouds. Moreover, with these              cost of 60 ms. This would hurt the perception performance
+methods, it is possible to apply bytestream compressions of              and be hard to use, as illustrated in Figure 4.
+run-length encoding (RLE) and dictionary coding (LZ77) [46]                 In summary, there is a need for a low-latency, lightweight,
+to the point clouds directly; they treat point clouds as raw             and efficient LiDAR compression method for edge-assisted
+byte arrays and deflate them losslessly. We compare these                online perceptions, which motivates us to pursue this work.
+methods based on performance, quality, and efficiency metrics
+on a desktop and on NVIDIA Jetson AGX of our experimental                    IV. I NTERMEDIATE R EPRESENTATIONS FOR FL I CR
+testbed, as described in Section VII-A. As the quality metrics
+of the point clouds, we use peak signal-to-noise ratio (PSNR)               For meeting the aforesaid requirements, it is important to
+and Chamfer Distance (CD) as defined in Section VI. For                  select a proper IR because the compression is dependent on
+each method, we encode and decode 100 point clouds from                  each IR. In this section, we microbenchmark the IR conver-
+the KITTI dataset [20]. The averaged results are in Table I,             sions and point out the benefit of range images (RIs) over the
+showing the results of the desktop, and in parentheses the               others in the context of enabling remote online perceptions.
+results from the Jetson.
+                                                                            TABLE II: The latencies (ms) of each IR construction.
+   While every method has its advantages for different metrics,
+we focus on the compression ratio, energy usage and latency,                                 RI      Parallel RI     Octree      K-d tree   Mesh
+because these metrics show how well a compression method                      Desktop       11.78       6.72         30.67        13.21     1872
+meets the requirements of point cloud compression for edge-                    Jetson       16.34       9.26         32.11        32.44     2755
+assisted online perceptions. For our target use case, there are
+three requirements of a compression method.                                 Table II shows the conversion latencies of the IRs with the
+(1) It should be very low-latency because of the latency-                LiDAR point clouds from the KITTI dataset [20]. We use
+    performance tradeoff of online perceptions;                          PCL [38] implementations for octree and k-d tree, and mesh
+(2) The compression performance effectiveness in reducing                conversion is based on the algorithm of Marton et al. [47].
+    the data size is important since the larger size of com-             The RI conversion is our implementation, and the parallelized
+    pressed data causes higher network cost and energy con-              version is with OpenMP [48]. The RIs are generated by
+    sumption on the client to transmit;                                  converting the raw points in the 3D Cartesian coordinates to
+(3) It should be lightweight to run on mobile devices of                 the spherical coordinates. Equation 1 shows the conversion and
+    limited resources while satisfying the other requirements.           r, θ, and ϕ are the radial distance, polar angle, and azimuthal
+   For the compression ratio and latency, Google Draco out-              angle each. When θ and ϕ are calculated, they are mapped
+performs the other methods and is highly efficient in terms of           to the frame pixel by the sensor’s angular precisions. For
+the compression ratio and energy usage. Although RLE shows               example, Velodyne HDL-64E used in the KITTI dataset has
+comparable latency and energy usage on Jetson, it shows                  0.08° and 0.35° for horizontal and azimuthal precisions with
+increased total size when applying RLE directly to the floating-         360° of the horizontal field of view (FoV) and 64 vertical
+point values of 3D points. Except for the lossless methods,              lasers [49]. Thus, each scan’s point cloud would be mapped
+PCL’s octree compression shows the highest quality metrics.              to a 2D frame of 4500×64. By adjusting the parameters of
+However, it is at the cost of the lower efficiency and high              precisions and FoV, RI can work on diverse LiDAR sensors.
+
+
+
+                                                                     4
+                            p
+                      r=      x2 + y 2 + z 2
+                                       z 
+                           θ = arccos                             (1)
+                                        yr 
+                           ϕ = arctan
+                                         x                                                      (a) Point cloud of QP 0.
+   In our results, the parallelized RI conversion shows the
+lowest latency on both desktop and Jetson as RI has advan-
+tages over other IRs in terms of simplicity and parallelism.
+For the octree and k-d tree, there have been many efforts
+for their parallelized constructions [50]–[54]. However, as
+                                                                                                (b) Point cloud of QP 10.
+pointed out in the previous works, their hierarchical structures
+inherently make the construction processes sequential, and
+it is challenging to fully parallelize their constructions. In
+contrast, the RI conversion can be easily parallelized since
+each point conversion of RI is completely independent from
+the others. For the mesh, its generation from point clouds                                      (c) Point cloud of QP 20.
+requires triangulation algorithms and calculating the surface
+normal for each mesh. These processes require iterating each
+point and finding nearest neighbors to generate a mesh, and the
+mesh conversion has high computational complexity and is not
+suitable for real-time due to its large magnitude of execution
+time [47], [55], [56].                                                                          (d) Point cloud of QP 30.
+   Furthermore, these IRs have different theoretical complex-
+ities for the conversion. The time complexities of the IR con-              Fig. 5: The visualizations of the reconstructed point clouds from
+                                                                            the RI of 4500×64 with H.264 and four different quantization
+structions are O(n) for the RI and O(n log n) for the trees and             parameters.
+mesh; the trees require binary search for each point insertion,
+and the mesh construction needs nearest neighbor searches for
+the normal estimation and triangulation. In addition, there is a            A. Issues with Current Image Compressions
+side benefit that various image-processing techniques can be
+                                                                               By representing LiDAR point clouds as images, it becomes
+used for RIs. Based on these observations, we adapt RI as the
+                                                                            possible to leverage the existing image-processing infrastruc-
+target IR.
+                                                                            tures and techniques. With the popularity of video streaming,
+                                                                            modern processor platforms and GPUs are equipped with
+         V. FL I CR: R ANGE I MAGE C OMPRESSION                             dedicated hardware modules for the standard codecs such as
+   Following selecting RI as the appropriate IR, the compres-               H.264 and HEVC [17]–[19]. These codecs efficiently encode
+sion also needs to be efficient, low-latency, and lightweight. In           and decode continuous images with spatial and temporal
+this section, we describe how to achieve the objectives of the              optimizations [14], [16], and the pervasive accelerators enable
+compression method. First, we identify the distortion issue of              the codecs in a low-latency and efficient way even with
+the current image codecs to LiDAR RIs. Second, we explore                   commodity mobile devices.
+the opportunity of lossy RIs for the downstream compression                    In this context, it seems appropriate to rely on the existing
+steps via RI quantization and subsampling. We argue the                     codecs with hardware accelerators at first glance. However,
+lossless bytestream compressions can be hugely enhanced in                  we argue the existing codecs specialized for human vision
+terms of the compression efficiency and low latency through                 are hardly applicable to RI compression. The lossy image
+the lossy representation. However, it compromises the point                 compression algorithms for human vision fully utilize the
+cloud quality, and we present the possible issues of FLiCR                  characteristics of the human eyes to remove the data with
+with lossy RIs.                                                             minimal impacts to visual quality as much as possible; one
+                                                                            example is to convert an image into the frequency domain
+TABLE III: The compression ratios and qualities of H.264                    via discrete cosine transform (DCT) or fast Fourier transform
+with different QPs for 100 RIs of 4500×64 and 8 bpp.                        (FFT) and the high frequency has more loss than the low-
+                                                                            frequency data [14], [16], [57]. While the techniques that
+                            QP 0    QP 10       QP 20    QP 30              leverage the nature of human vision work well for normal
+       Compression Ratio    12.85   13.33        16.41   35.01              images, the point cloud details are effectively lost as a result
+         PSNR (dB)          63.18   48.21        37.61   38.12
+          CD (cm)           2.23    16.25       126.06   107.16             of the frequency-domain loss in LiDAR RIs.
+                                                                               Figure 5 shows the reconstructed point clouds from the RIs
+                                                                            encoded and decoded via H.264 with different quantization
+
+
+
+                                                                        5
+parameters (QP). QP regulates how much spatial detail is                    B. RI Quantization and Subsampling
+retained and is set from 0 for lossless to 51 for the most lossy               RI has been used for losslessly mapping LiDAR point
+compression. As QP increases, the spatial detail is aggregated              clouds to 2D frames, and previous work only applies quantiza-
+so that the encoded bit rate drops at the expense of data                   tion of bit-per-point (bpp) [26]–[29], [32], [33]. In these prior
+loss, resulting in lower quality [14]. The reconstructed point              works, the main objective is to maximize the compression
+clouds become vague and noisy with high QPs. Table III                      efficiency while maintaining the point cloud quality as high as
+shows the averaged compression ratio and quality metrics of                 possible. However, we argue that there are more optimization
+the reconstructed point cloud with different QPs. With the                  opportunities with lossy RI to decrease not only the data size
+visual results of the reconstructed point clouds, the PSNR and              but the downstream compression tasks’ complexities. Specifi-
+CD results become worse drastically while the compression                   cally, the RI resolution is determined by the sensor’s precisions
+ratio increases moderately. Considering that the quantization               as mentioned in Section IV, and the subsampling of point
+parameter such as QP or CRF of video streaming is usually set               clouds can be done by adjusting the precision parameters;
+around 20 and 30 as a rule of thumb (FFmpeg’s H.264 default                 the 3D points are coarsely mapped to a 2D frame. Figure 6
+CRF is 23 [58]), these results show the current human-vision                shows the visualizations of reconstructed point clouds from the
+codecs are unsuitable for the RI compression. For preserving                subsampled RIs. From the raw point cloud of Figure 2a, we
+the quality of point clouds, the codec quantization parameter               reduced the precision parameters to map it to the RIs of four
+should be set for lossless (QP 0), but it is at the cost of                 different lower resolutions. Even with the lowest subsampled
+the lower compression efficiency, as Google Draco achieves                  RI of 16 KB with 8 bpp, the shapes of scanned objects are
+∼33% higher compression ratio in Table I.                                   recognizable.
+                                                                               While the subsampled and quantized RI has advantages for
+TABLE IV: The existing quality metrics with sampling error
+                                                                            data reduction and compression with lower latencies, it would
+(SE) for the subsampled RIs of 8 bpp.
+                                                                            affect the performance of the perception tasks. So, a quality
+                                                                            metric for the point clouds from lossy RIs needs to reflect both
+                    2048×64    1024×64     512×64     256×64
+      PSNR (dB)       62.4       61.41      58.61      53.71                the quantization and subsampling errors. The currently used
+       CD (cm)        5.37        9.23      15.22      36.17                metrics, PSNR and CD, reflect the quantization error well, but
+         SE          21.03%     58.77%     78.95%     89.22%                the sampling error of lossy RIs is not represented effectively
+                                                                            as these metrics are defined with the point-to-point distances
+                                                                            between point clouds (see Section VI for more details).
+                                                                               Table IV shows PSNR, CD, and sampling error (SE) of
+                                                                            the point clouds from four RI resolutions. In the results, the
+                                                                            changes of PSNR and CD exhibit different trends from SE
+                                                                            because SE is about the number of lost points from the original
+                                                                            point cloud (the entropy-wise quality) while PSNR and CD are
+                                                                            with the distances of the closest point pairs between two point
+                  (a) Point cloud from 2048×64 RI.
+                                                                            clouds (the point-wise quality).
+                                                                               The current metrics’ issue is they only count the point-
+                                                                            to-point distances, and each point distance is calculated by
+                                                                            finding the nearest point in the comparing point cloud. So,
+                                                                            when the point clouds have different numbers of points, they
+                                                                            are limited to represent this difference in the total number
+                  (b) Point cloud from 1024×64 RI.
+                                                                            of points in the point clouds. To address the limitations of
+                                                                            the existing metrics, we propose a unified metric for both
+                                                                            the point-wise quality and the information amount to measure
+                                                                            quantitatively the impacts on the downstream perceptions from
+                                                                            lossy RIs in Section VI.
+                  (c) Point cloud from 512×64 RI.                           C. Lossless Compression with Lossy RIs
+                                                                               As shown in Section V-A, the application of lossy video
+                                                                            codecs to RIs results in lower compression efficiency or can
+                                                                            distort the point clouds in the 3D space. The previous RI com-
+                                                                            pression methods apply the image compression algorithm at
+                                                                            lower efficiencies or propose effective lossless RI compression
+                  (d) Point cloud from 256×64 RI.
+                                                                            algorithms via spatial and temporal optimizations [26]–[29],
+Fig. 6: The visualizations of the point clouds reconstructed from the       [32], [33]. However, they partially leverage the opportunities
+subsampled RIs of Figure 2a corresponding to 4500×64 RI.                    of lossy RIs only with bit quantization, and their complex
+                                                                            algorithms have downsides in terms of latency and overheads,
+
+
+
+                                                                        6
+                    Sampling Er ror
+                                                                                      both quantization and subsampling are required to improve
+                                                                                      the compression ratios effectively, as shown in Figure 8a.
+   Original Point Cloud
+                                                                                      Then, dictionary coding shows larger growth than RLE, and
+                                      RI (float value)
+                        PC2RI                                                         these results support our assumption about the performance
+                      Conversion                         Quantization Er ror
+                                       Quantization                                   improvement of dictionary coding with lossy RIs.
+                                                                Lossless
+                                                                Deflation
+                                                                                         Although FLiCR achieves compression efficiency and re-
+                                                                                      duced latency, it is at the cost of degradation of the point
+                                                          Compressed Bytestream       cloud quality by the quantization and subsampling errors, as
+                                                                Lossless
+                                                                                      shown in Figures 8c and 8d. Since the reduced point cloud
+   Reconstructed Point Cloud
+                                                                Inflation             quality can have an impact on the downstream perceptions, we
+                                      Dequantization
+                                                                                      evaluate FLiCR with the state-of-the-art LiDAR perceptions
+                                      RI (float value)
+                        RI2PC                                                         and analyze the errors’ impacts in Section VII.
+                      Conversion
+                                                                                         Figure 9 shows the latency breakdowns of FLiCR on our
+                                                                                      testbed. In the case where Jetson is a mobile client and the
+Fig. 7: FLiCR compression steps with lossy RIs of subsampling and                     desktop is a server, the end-to-end latency is ∼39 ms (∼60%
+quantization and lossless compression algorithms.
+                                                                                      of Google Draco [42]) even with the highest RI resolution; it
+                                                                                      takes 27 ms for client encoding and 12 ms for server decoding.
+                                                                                      With the 256×64 resolution, the end-to-end latency is ∼10 ms
+while showing high compression ratios. For satisfying the low-                        which is ∼16% of Draco. Since the large portion of the end-to-
+latency, lightweight, and efficiency requirements, we use the                         end latency is the conversion time between the point cloud and
+existing bytestream compression algorithm, dictionary coding,                         RI, the end-to-end latencies can be largely reduced if a device
+and enhance its efficiency by fully leveraging the RI quanti-                         has a dedicated hardware logic for the RI conversion. As the
+zation and subsampling.                                                               RI resolution gets lower, the quantization and compression
+   Dictionary coding is a lossless compression algorithm for                          latencies decrease. These results show FLiCR fully leverages
+bytestreams and deflates the bytestream by replacing the                              the synergistic effect by quantization and subsampling for the
+repeating patterns with shorter references. Dictionary coding                         bytestream compressions.
+algorithms have been extensively studied with corpus text
+data, and they are with simple bit/byte operations and lower                              VI. E PSNR: Q UALITY M ETRIC FOR L I DAR P OINT
+computation complexities in terms of the space-time trade-                                                   C LOUDS
+off [59]. So, they provide the benefits of being lightweight and                         The errors in the RI conversion process can affect the
+low-latency, with simple operations and do not distort point                          performance of LiDAR perceptions. PSNR and CD (or RMSE)
+clouds unexpectedly. Even with such advantages, the direct                            have been broadly used as the quality metrics of 3D point
+application of bytestream compressions to the raw point cloud                         clouds [26], [27], [30], [32]–[34], [40], but by definition they
+and unquantized RIs of floating values is inefficient in terms                        are point-wise quality metrics and do not reflect the point
+of the compression ratio (RLE and Dict Coding in Table I and                          loss effectively. In the context of our approach with lossy
+Figure 8a).                                                                           RIs, we argue a metric for both point-wise quality and overall
+   To improve the efficiency, we fully utilize both quantization                      information amount is essential.
+and subsampling. The underlying assumption of our approach
+is dictionary coding uses the repeating features in a bytestream                                      Dist(p, C) = min (pc − p)2
+                                                                                                                                    
+                                                                                                                                                   (2)
+and there is a higher probability of recurring patterns when                                                          pc
+
+limiting the representation space of quantized RIs. The com-
+pression pipeline is shown in Figure 7. FLiCR with dictionary                                                        ∥C2 ∥−1
+coding has similarity to previous RI-based works in terms of                                                     1    X
+                                                                                            M SE(C1 , C2 ) =                 {Dist(pc2 , C1 )}     (3)
+leveraging local spatial features, but it is more advantageous                                                  ∥C2 ∥ i=0
+in meeting the requirements with its simplicity. Explicitly,
+                                                                                        Both PSNR and CD use the mean squared error (MSE)
+compared to the recent RI-based compression (RT-ST [32] in
+                                                                                      of the point-wise distances between two point clouds. When
+Table I), FLiCR shows lower encoding and decoding latencies
+                                                                                      C1 is the original point cloud and C2 is the reconstructed
+and energy usage, with the higher compression ratio, as shown
+                                                                                      point cloud, the distance between a point in C2 and the
+in Table V.
+                                                                                      corresponding point in C1 is calculated by Equation 2. So,
+   Among the dictionary coding algorithms, we use LZ77 [46]                           the corresponding point in C1 is of the shortest distance to the
+and compare it with RLE. We measure the efficiency im-                                point in C2 . Then, MSE between two point clouds is defined
+provement and quality reduction by the quantization and                               by Equation 3.
+subsampling with LZ77 and RLE, and Figure 8 shows the
+results of different resolutions of RIs quantized by 8 bpp.
+While the end-to-end latencies of the whole compression                               CD(Corig , Ccomp ) = M SE(Corig , Ccomp ) + M SE(Ccomp , Corig )
+pipeline can decrease only with subsampling (see Figure 8b),                                                                                       (4)
+
+
+
+                                                                                  7
+                                                                                                       70
+                         212      DictCoding                                                                                     DictCoding
+                         197      DictCoding - Quant (FLiCR)                                           60                        DictCoding - Quant (FLiCR)
+                         182      RLE                                                                                            RLE
+                         167      RLE - Quant                                                                                    RLE - Quant
+         Compression Ratio
+                         152                                                                           50                        Jet:DictCoding
+                                                                                                                                 Jet:DictCoding - Quant (FLiCR)
+
+
+
+
+                                                                                            Latency (ms)
+                         137                                                                                                     Jet:RLE
+                         122                                                                           40
+                                                                                                                                 Jet:RLE - Quant
+                         107
+                          92                                                                           30
+                          77
+                          62                                                                           20
+                          47
+                          32
+                          17                                                                           10
+                           2
+                           4500x64 4096x64 2048x64 1024x64 512x64 256x64                                   04500x64 4096x64 2048x64 1024x64 512x64        256x64
+                                           RI Resolution                                                                    RI Resolution
+               (a) The compression ratios with and without quanti-                              (b) The end-to-end latencies with and without quan-
+               zation in different RI resolutions.                                              tization in different RI resolutions.
+                  66                                                                               40
+                                                                                                            CD
+                                                                                                   35       CD with Quantization
+                         62                                                                            30
+                                                                                                       25
+         PSNR (dB)
+
+
+
+
+                                                                                             CD (cm)
+                         58                                                                            20
+                                                                                                       15
+                         54                                                                            10
+                                  PSNR                                                                     5
+                                  PSNR with Quantization
+                         504500x64 4096x64 2048x64 1024x64 512x64                                          0
+                                                                       256x64                              4500x64 4096x64 2048x64 1024x64 512x64         256x64
+                                           RI Resolution                                                                    RI Resolution
+               (c) The PSNR results with and without quantization                               (d) The CD results with and without quantization in
+               in different RI resolutions.                                                     different RI resolutions.
+                                  Fig. 8: The quantization and subsampling impacts on the lossless bytestream compressions.
+
+
+                                                                                            Based on our observation, we argue it is inappropriate to use
+                                                                                        the metrics representing only the point-wise quality for LiDAR
+                                                           M ax2
+       P SN R(Corig , Ccomp ) = 10 log                M SE(Corig ,Ccomp )       (5)       point clouds. To address the limitation of the current metrics,
+                                                                                          we propose a new single-number metric, entropy-reflecting
+   Then, PSNR and CD are defined as Equation 4 and 5. CD                                  PSNR (ePSNR), by extending PSNR. ePSNR is designed
+is the sum of reciprocal MSEs between two point clouds, and                               to indicate both the point-wise and entropy-wise quality of
+PSNR is the ratio of the peak LiDAR sensor range to MSE.                                  a point cloud.
+As indicated by their definitions, these metrics are based on
+MSE and are determined by the point-to-point distance. They
+natively represent the quality loss by the quantization error, but                           SE is related to the total information (entropy) loss in a point
+the subsampling error is not effectively represented even if the                          cloud because it is the percent of the lost points, as in Equa-
+impact of SE is shown mildly as some nearest points can be                                tion 6. One naive way of making PSNR reflect the entropy is to
+lost in the reconstructed point cloud. Specifically, in the current                       multiply 1−SE to PSNR with the assumption that the entropy
+metrics, it is possible to get a high-quality result even with a                          is 1 − SE and SE is exactly the same with the actual entropy
+few points of small distances to a point cloud of large number                            loss, LSE . However, instead of the naive way, we extend
+of points. It is caused by the unstructured nature of the LiDAR                           PSNR by estimating LSE . Our underlying assumption is LSE
+point cloud; there is no point-to-point correspondence between                            is not exactly the same with SE and follows the exponential
+LiDAR point clouds having different numbers of points. In the                             distribution as Equation 7. The intuition for this assumption
+case of the normal images, the total number of pixels is fixed                            is that SE can have minimal impacts on the downstream
+without SE and the point-wise metrics work well.                                          perceptions as far as the total amount of necessary information
+                                                                                          is preserved for the perception algorithms. It means there
+                               ∥Corig − Ccomp ∥                                           would be a knee of the curve in the graph of the entropy
+                     SE =                       , 0 ≤ SE ≤ 1                    (6)       function.
+                                   ∥Corig ∥
+
+
+                                                                                      8
+                25
+                                                         PC2RI Conversion
+                                                         RI Quantization               eP SN R(Corig , Ccomp ) = P SN R × {1 − (SE × (F(SE) + α))} ,
+                20                                       Deflation
+                                                         Inflation                                           0 ≤ F(SE) + α ≤ 1
+                                                         RI Dequantization                                                                          (9)
+                15                                       RI2PC Conversion
+     Latency (ms)
+
+
+
+                                                                                                             VII. E VALUATION
+                10                                                                        The goal of this section is to demonstrate that our approach
+                                                                                       appropriately meets the requirements of the LiDAR point
+                                                                                       cloud compression for enabling edge-assisted online percep-
+                     5
+                                                                                       tions. We compare FLiCR with several existing compression
+                                                                                       method. Since FLiCR affects the quality of the point clouds, its
+                     0 4500x64 4096x64 2048x64 1024x64 512x64 256x64                   impact is evaluated with the state-of-the-art LiDAR perception
+                                                                                       algorithms for 3D objection detection and LiDAR odometry
+           (a) The latency breakdown of our method on desktop.
+                                                                                       and mapping (LOAM). We also evaluate ePSNR and demon-
+                    50                                   PC2RI Conversion              strate its effectiveness compared to PSNR and the naive way of
+                    45                                   RI Quantization               combining PSNR and SE. All experiments are done by using
+                                                         Deflation
+                    40                                   Inflation                     the LiDAR point clouds of the KITTI dataset [20], which are
+                    35                                   RI Dequantization             captured from Velodyne HDL-64E [49].
+                                                         RI2PC Conversion
+      Latency (ms)
+
+
+
+
+                    30
+                                                                                       A. Experimental Testbed
+                    25
+                    20                                                                   The testbed consists of two machines, an NVIDIA Jetson
+                                                                                       AGX Xavier and a high-end desktop. The Jetson has ARMv8
+                    15
+                                                                                       CPU and 32 GB memory, and we set its power mode as
+                    10                                                                 15W. The desktop has Intel Core i7-10700, 32 GB memory,
+                     5                                                                 and NVIDIA RTX 2070 GPU. Both run Ubuntu 18.04, and
+                     0 4500x64 4096x64 2048x64 1024x64   512x64 256x64                 the energy usage is measured with perf on desktop and
+                                                                                       tegrastats on Jetson.
+        (b) The latency breakdown of our method on Jetson
+        AGX.                                                                           B. FLiCR Benchmark
+         Fig. 9: The end-to-end latency breakdowns of FLiCR.                              As shown in Table I, Google Draco [42] is the most
+                                                                                       suitable compression method for online perceptions in terms of
+                                                                                       compression ratio, latency, and energy usage. So, we compare
+                                                                                       FLiCR with different RI resolutions to Draco. We benchmark
+                                                                                       FLiCR and measure the compression ratio, SE, PSNR, ePSNR
+                          Assumption :          LSE ∼ exp(β)                 (7)
+                                                                                       (α = −0.15, β = 0.5), latencies, and energy usage. The
+                                                                                       compression level parameter of Draco is set as 10 which is
+   When LSE follows the exponential distribution, the en-                              maximum. For FLiCR, each RI is quantized by 8 bpp. The
+tropy function F(SE) can be defined with the cummulative                               benchmark results are shown in Table V.
+distribution function (CDF) of the exponential distribution as                            FLiCR achieves higher compression ratios across all resolu-
+Equation 8. This entropy function is a probability function                            tions than Draco, and it is ∼25% higher even with the highest
+estimating the actual entropy of the remaining points in a point                       resolution. As highlighted in Table V, FLiCR with little
+cloud with the given SE.                                                               subsampling starts to outperform Draco in the compression
+                                                                                       ratio, latency, and energy usage. One characteristic of Draco
+                                            x                                          is its encoding process takes longer and uses more energy
+    F(SE) = P(E > x) = e− β                       where x = 1 − SE           (8)       than decoding while with FLiCR it is similar in most cases.
+                                                                                       Considering the use case of edge-assisted perceptions, it is the
+  With our entropy function, ePSNR is defined as Equation 9.                           client who encodes and sends data, and the server receives and
+Since it is based on PSNR, the point-wise quality with the                             decodes the encoded data to feed it to perception modules.
+quantization error is represented while reflecting the entropy                         When the client is Jetson and the server is the desktop in
+with the given SE. When SE is small, ePSNR would be                                    our testbed, Draco introduces ∼60 ms end-to-end latency,
+almost same with the original PSNR, but would start to                                 and with FLiCR it ranges from ∼11 ms for 256×64 to ∼40
+decrease exponentially when SE gets larger, by its definition.                         ms for 4500×64. Therefore, FLiCR is more advantageous
+ePSNR has two parameters: α as a derivative adjusting factor                           for the latency-performance tradeoff of online perceptions
+to prevent too steep or shallow distribution and β of the                              for commodity mobile devices, given its higher compression
+exponential distribution.                                                              efficiency in terms of compression ratios and energy usage.
+
+
+
+                                                                                   9
+                        TABLE V: The comparison between Google Draco and FLiCR of different RI resolutions.
+                                                        FLiCR            FLiCR           FLiCR          FLiCR          FLiCR          FLiCR
+                                      Google Draco
+                                                       4500×64         4096×64         2048×64         1024×64        512×64         256×64
+ Compression Ratio                        17.05          21.26           24.75           46.18           80.88         131.13         215.85
+ SE                                       6.7%           8.4%             9.1%            21%           58.8%          78.9%          89.2%
+ PSNR (dB)                                67.29          63.18           63.09            62.4           61.41          58.61          53.71
+ ePSNR (dB)                               67.27          63.13           63.01           61.64           51.38          35.4           22.29
+ Enc Time (ms)                         21.1 (48.4)   10.48 (26.83)    7.69 (23.41)    4.3 (16.03)    3.37 (12.26)   2.35 (10.46)   1.99 (9.54)
+ Dec Time (ms)                         9.44 (18.6)   12.52 (21.94)    7.44 (20.97)    4.67 (17.09)   2.47 (15.13)   2.01 (11.06)   1.36 (10.11)
+ Enc Energy Usage (J)                  0.83 (0.14)    0.36 (0.09)     0.27 (0.07)     0.16 (0.04)     0.13 (0.03)    0.09 (0.03)   0.07 (0.02)
+ Dec Energy Usage (J)                  0.36 (0.05)    0.48 (0.05)      0.3 (0.05)     0.19 (0.04)     0.13 (0.04)    0.09 (0.03)   0.08 (0.02)
+
+
+
+   To satisfy the aforementioned requirements, we compromise              is determined by the detected objects corresponding to the
+the quality of point clouds with lossy RIs. Since Draco                   ground truth object with the IoU threshold.
+quantizes each point as 11 bpp, it shows a higher PSNR,                       Table VI shows the recall for the detected objects of the
+and ePSNR is almost same with PSNR as it has small SE.                    models. With the highlighted example of PointPillars, the
+One issue about SE is that the highest resolution RIs have                performance reductions between the original and 4500×64 RIs
+∼8% SE even though its resolution is with the maximum                     show the impact of the quantization error. In the case of IoU
+sensor precision of HDL64 specified in the spec sheet [49].               threshold 0.7, it shows ∼23% performance reduction while it
+We presume this SE is caused by the sensor’s measurement                  is ∼2% with threshold 0.3. This shows the results of higher
+error and noise as the LiDAR point clouds are captured by                 IoU thresholds are more sensitive to the quantization error,
+running cars. In Table V, PSNR barely changes with 1024×64                and 3D object detection with a higher IoU threshold requires
+RIs which have 58.8% SE while ePSNR reflects it. Since                    input point clouds of almost the same quality as the original
+the reduced quality affects the performance of downstream                 training data.
+perceptions, we also evaluate our compression and metric with                 The results across the different resolutions show the impacts
+the state-of-the-art LiDAR perceptions.                                   of SE. One noticeable thing is the performance results decrease
+C. End-to-end Evaluation                                                  little with 2048×64 RIs compared to 4500×64 RIs, and this
+   We evaluate our method and metric with two perception                  trend is for all IoU thresholds. These results support our
+tasks: 3D object detection and LOAM. For 3D object de-                    assumption for ePSNR in Section VI; there is a knee of the
+tection, we use machine learning (ML) models pre-trained                  curve in the entropy loss by SE. Moreover, Table V shows the
+with the original point clouds from the KITTI dataset from                ePSNR results drop drastically from 1024×64 RIs as does the
+the Model Zoo of OpenPCDet [60]. We use the following                     performance of the 3D objection detection models.
+models: Part-A2 Net [61], PointPillars [62], PointRCNN [63],                  Figure 10 shows the object detection recall values, and
+PV-RCNN [64], SECOND [65], Voxel R-CNN [66]. These                        PSNR, ePSNR, and the naive way of making PSNR capture
+models are trained with 7481 samples, and the testset is 7518             entropy, PSNR×(1−SE), as described in Section VI. The IoU
+LiDAR scans. For LOAM [67], we use the A-LOAM imple-                      threshold is 0.5 for all detection models, and the parameters
+mentation [68]. For checking the impacts of RI quantization               of ePSNR are α (-0.15) and β (0.5). For the changes of SE
+and subsampling, we generate the LiDAR point cloud dataset                and recalls, PSNR mildly changes across the RI resolutions,
+reconstructed from different resolution RIs. Then, we feed our            and PSNR×(1 − SE) shows more drastic decreases compared
+dataset to those perception models. Since the object detection            to the perception results. On the other hand, ePSNR shows a
+models are trained with the original LiDAR data and A-LOAM                similar trend with the performance reduction of the perception
+is implemented and tested by using the original dataset, we can           models. These results demonstrate the effectiveness of ePSNR
+quantitatively measure the impacts of lossy RIs in FLiCR on               with the probability function estimating the actual entropy by
+the perception performance.                                               using SE, as a single-number metric for the point-wise and
+3D Object Detection. 3D object detection is the task of                   entropy-wise qualities of a point cloud.
+detecting objects from 3D point clouds. Each algorithm of the             LiDAR Odometry and Mapping. LOAM (or LiDAR SLAM)
+models we use has a different network architecture, but there             is a 3D mapping technique running the odometry, point
+is a commonality between them: a backbone network extracts                matching, and registration (mapping) algorithms simultane-
+features from the point clouds and the extracted features                 ously [67]. LOAM, and other SLAM algorithms that use dif-
+are used by the regional proposal networks (RPN). As the                  ferent sensors, are widely used in various use cases, including
+backbone networks of these models, PointNet++ [69] is used                autonomous vehicle, extended reality, and 3D reconstruction,
+to extract the point-level features. For the voxel-level features,        and are one of the key perception tasks. We evaluate the
+the voxel feature encoder (VFE) layer and 3D sparse convolu-              quality impacts of point clouds reconstructed from different
+tional networks [70] are used. When each model produces the               RI resolutions with A-LOAM [68] and the evaluator [71].
+region proposals of the detected objects, they are compared               The experiments are with a sequence of 1101 LiDAR point
+with the region of the ground truth objects. The result recall            clouds from the KITTI dataset. We show our evaluation results
+
+
+
+                                                                     10
+TABLE VI: The 3D object detection performances with different IoU threshold and reconstructed point clouds from the RIs. The number
+in each cell is the recall for the detected objects in the scene.
+
+                                                                               Original      4500×64 RI              4096×64 RI       2048×64 RI    1024×64 RI     512×64 RI     256×64 RI
+                                                               Part-A2 Net      95.1            88.4                    88.3             87.9          76.2           75.5          56.1
+                                                               PointPillars      94             92.6                    92.4             91.5           82            76.1          54.8
+ IoU Threshold                                                 PointRCNN        89.8            70.7                    71.2             71.7          68.8           62.9          47.5
+      0.3                                                       PV-RCNN         96.8            94.6                    94.4              94           89.9           82.8          70.2
+                                                                SECOND          94.9            92.7                    92.6             92.1          88.4           79.4          60.2
+                                                              Voxel R-CNN       95.4            93.6                    93.6             93.5           89            87.5          76.1
+                                                               Part-A2 Net      91.2            82.3                    82.2             81.1          71.4           63.7          41.3
+                                                               PointPillars     88.7            82.7                    82.5              81           69.8           57.8          30.8
+ IoU Threshold                                                 PointRCNN        87.1            65.5                     66              66.2          63.8            57           38.5
+      0.5                                                       PV-RCNN         93.4            88.9                    88.8             87.6          81.8           71.2           53
+                                                                SECOND          89.1            83.8                    83.7             82.3          76.8           61.9           38
+                                                              Voxel R-CNN       94.9            91.1                    91.1             90.5          85.2           79.4          58.4
+                                                               Part-A2 Net      73.6            59.9                    59.8             57.4           46            38.1          21.6
+                                                               PointPillars     63.9            49.6                    49.3              46           33.4           18.4           5.5
+ IoU Threshold                                                 PointRCNN        73.3            46.8                    47.3             46.9          43.9           36.4          20.8
+      0.7                                                       PV-RCNN         75.9            60.6                    60.4             57.4           49            33.3          16.7
+                                                                SECOND          66.5            52.4                    52.3             49.1          41.5           26.3          10.3
+                                                              Voxel R-CNN       84.6            67.9                    67.9              64           54.1           37.1          16.4
+
+
+
+                                               Part-A 2         PV-RCNN           PSNR                                   TABLE VII: The LOAM averaged results of the error metrics:
+                                               PointPillars     SECOND            ePSNR                                  Position (m) and Rotation (degree).
+                                               PointRCNN        Voxel R-CNN       PSNR*(1-SE)
+                                    100                                                          70                                             ATEpos    ATErot    REpos      RErot
+                                                                                                                                   Original      0.316     0.57     0.389       0.82
+                                                                                                 60                              4500×64 RI      0.321      0.2     0.387       0.83
+                                     80                                                                                          4096×64 RI      0.313     0.21      0.39       0.84
+                                                                                                                                 2048×64 RI      0.294     0.17     0.388       0.82
+   3D Object Detection Recall (%)
+
+
+
+
+                                                                                                 50                              1024×64 RI      0.394     0.17     0.388       0.82
+                                                                                                                                  512×64 RI      0.610     0.17     0.388       0.82
+                                     60
+                                                                                                 40
+                                                                                                     Decibel (dB)
+
+
+
+
+                                                                                                                                  256×64 RI      0.596      0.2     0.387       0.82
+
+                                                                                                 30
+                                     40
+
+                                                                                                 20
+                                                                                                                         and plane mapping resolutions of A-LOAM are 0.4 m and
+                                                                                                                         0.8 m [68]. The increased ATEpos for 512×64 and 256×64
+                                     20
+                                                                                                 10                      are because the coarser subsampling causes loss of the sparse
+                                                                                                                         regions in the scene. Specifically, in Figure 6, the points over
+                                      0                                                                                  long distances are lost with coarser subsampling. The distance
+                                          4500x64 4096x64 2048x64 1024x64 512x64          256x64 0
+                                            (8%)    (9%)    (21%)      (58%)    (79%)      (89%)                         errors are reflected in ATEpos because ATE calculates the
+                                                         RI Resolutions with SE                                          RMSE over the whole path; there is no global reference in
+Fig. 10: The results of PSNR, ePSNR, and the naively-entropy-                                                            LOAM, and the early small errors can contribute to ATE more
+reflecting PSNR with the 3D object detection results of the IoU                                                          than the later errors [72]–[74]. For REpos , it calculates the
+threshold 0.5 for the models.                                                                                            averaged errors of separate sub-trajectories, and the distance
+                                                                                                                         errors are not accumulated over the whole path.
+                                                                                                                         Summary. Based on the experiments, we demonstrate that
+using two metrics: absolute trajectory error (ATE) and relative                                                          FLiCR is suitable for enabling edge-assisted online percep-
+error (RE). While ATE calculates the root mean squared                                                                   tions to mobile users. Compared to the existing LiDAR
+errors (RMSE) of position (ATEpos ) and rotation (ATErot )                                                               point cloud compressions, it is fast in terms of the end-to-
+to the groundtruth, RE measures the relative relations of sub-                                                           end compression/decompression latency, and lightweight and
+trajectories in position (REpos ) and rotation (RErot ) [72].                                                            efficient in terms of energy usage and compression ratio.
+   Table VII shows the evaluation results of A-LOAM with                                                                 FLiCR achieves these benefits by affecting the quality of the
+different RIs. Based on the results, the LOAM algorithm works                                                            point clouds using RI quantization and subsampling errors, and
+well even with high quantization and subsampling errors.                                                                 the end-to-end experiments of 3D object detection and LOAM
+Except for the increased ATEpos for 512×64 and 256×64,                                                                   show the impacts of the quality degradation on the downstream
+other results are almost same with the result of the original                                                            perception algorithms and their parameters. Even though the
+data. Moreover, the LOAM paths of all cases are almost                                                                   lossy RIs have a different effect on the perception performance
+identical to each other as shown in Figure 11. After thorough                                                            based on each algorithm setting, ePSNR is able to quantify
+analysis of the A-LOAM implementation, we find the mapping                                                               the point-wise and entropy-wise quality of a point cloud
+resolutions of A-LOAM are attributed to these results; the line                                                          effectively. Thus, when optimizing the compression method,
+
+
+
+                                                                                                                    11
+                                                                        train the ML models to predict the distribution of the octree
+                                  Top-View                              nodes [30], [34], [40], [41]. With the predicted distribution,
+              175
+                                                                        the occupancy information and nodes are effectively coded by
+                                                                        assigning proper bits to each node of non-empty child nodes.
+              150
+                                                                        For RI-based ML approaches, the spatial optimization is done
+              125                                                       by using the encoder and decoder networks trained with RIs
+              100                                                       of point clouds [27], [33]. Some of these ML algorithms
+       y[m]
+
+
+
+
+                                                                        achieve sufficiently low latency to run in real-time [30], [34].
+              75
+                                                  Original Path         However, they are not practical for mobile users, because they
+                                                  4500x64 Path
+              50                                  4096x64 Path          rely on high-end processors and GPUs, which are usually
+                                                  2048x64 Path
+              25                                  1024x64 Path          unavailable for mobile devices. Even if a mobile device has
+                                                  512x64 Path
+               0                                  256x64 Path           such computing resources, there is another issue with its
+                                                  /ground_truth
+                                                                        limited battery.
+                    100    50    0           50      100
+                                     x[m]
+
+                                                                                   IX. L IMITATIONS AND F UTURE W ORK
+Fig. 11: The path results of LOAM with point clouds of different
+RIs.
+                                                                           Although we show the effectiveness of FLiCR and ePSNR,
+                                                                        there are still some remaining limitations. Firstly, as we
+it would be crucial to co-design the compression system with            observed with the end-to-end experiments, perception models
+awareness of the impact on downstream perceptions, and we               pre-trained with the original data lose their predictive perfor-
+leave this for future work.                                             mance when used with point clouds reconstructed from lossy
+                                                                        RIs. To alleviate this issue, there is an opportunity to make
+                          VIII. R ELATED W ORK                          the perception models robust to point clouds from different
+   Given the popularity of 3D point clouds, there are many              RI resolutions. Another opportunity is to develop dedicated
+point cloud compression methods. Firstly, there are MPEG                hardware logic for the processing steps in Figure 7. As shown
+standard specifications: video-based point cloud compression            in Figure 9, the RI conversion takes a large portion of the
+(V-PCC) and geometry-based PCC (G-PCC) [31]. V-PCC                      end-to-end latency. Accelerating the conversion process would
+converts 3D point clouds into 2D frames and compresses the              further improve the latency benefits of FLiCR. In addition,
+frames with MPEG video codecs. G-PCC directly leverages                 ePSNR has a limitation. While ePSNR as a single-number
+the octree structure as the intermediate representation (IR),           metric effectively represents the point-wise and entropy-wise
+and compresses the octree of point clouds. Other than G-                point cloud qualities, it requires two parameters: α and β. We
+PCC, Google Draco [42] and Point Cloud Library (PCL)                    manually set these parameters for our experiments, but it is
+compressors [38] utilize tree structures including k-d tree and         not scalable. Therefore, there is a need to further develop a
+octree. After generating the tree structure from a point cloud,         tuning methodology for these parameters, or to further refine
+the occupancy information with the leaf nodes is coded, and             the quality metric for LiDAR point clouds.
+entropy or arithmetic coding is applied to compress the coded
+information [39], [75]. For range image compression, Tu et                                    X. C ONCLUSION
+al. present direct mapping of sensor data to 2D frames by
+each laser ID with precision and compress these raw RIs using              We describe the limitations of the existing point cloud
+image compression methods [26]. Other RI-based compression              compression methods for enabling LiDAR online perception
+methods convert the raw sensor data from Cartesian coordi-              on the edge. We propose a lightweight, low-latency, and
+nates into spherical coordinates by using the LiDAR sensor              efficient compression method by using RI and dictionary
+design [28], [29], [32]. Feng et al. propose spatial encoding           coding. For achieving the requirements, FLiCR fully leverages
+in the plane granularity and temporal optimization with scene           lossy RIs with quantization and subsampling. To quantify the
+alignment and prediction by using IMU fusion. Even though               quality loss by quantization and subsampling, we introduce
+these existing compression methods show decent compression              a new metric, ePSNR, which reflects both the point-wise
+performance, it is hard to apply them to our target use case            and entropy-wise qualities of a point cloud. We evaluate
+of online remote perceptions because of their high latency              our compression method and demonstrate FLiCR is more
+magnitudes, as described in Section III.                                appropriate for edge-assisted LiDAR online perceptions than
+   Recently, there has been research to utilize machine learn-          the state-of-the-art compression algorithms. Compared to the
+ing (ML) for LiDAR point cloud compression. One popular                 existing algorithm most suitable for the target use case, FLiCR
+approach is with the octree because the high compression                takes up to 80 percent less end-to-end latency while presenting
+ratio can be achieved by coding the tree into a more com-               12×compression ratio. Our evaluation results with 3D object
+pact bytestream with well-predicted occupancy information               detection and LOAM show the impact of lossy RIs on the
+of a given tree [75]. By fully utilizing the relationship of            downstream perceptions and the effectiveness of ePSNR com-
+neighboring nodes in the octree, the state-of-the-art works             pared to the current quality metrics to capture this impact.
+
+
+
+                                                                   12
+                         ACKNOWLEDGMENT                                          [18] Qualcomm,           “Snapdragon     855+/860       mobile      platform,”
+                                                                                      2021. [Online]. Available: https://www.qualcomm.com/products/
+   We would like to thank the anonymous reviewers. We are                             snapdragon-855-plus-and-860-mobile-platform
+grateful to José Araújo, Héctor Caltenco, Bob Forsman, Per- [19] Nvidia Corporation, “Nvidia video codec sdk,” 2021. [Online].
+                                                                                      Available: https://developer.nvidia.com/nvidia-video-codec-sdk
+Erik Brodin, and Gregoire Phillips for providing valuable [20] A. Geiger, P. Lenz, C. Stiller, and R. Urtasun, “Vision meets robotics:
+feedback on this work and helping us improve its presentation.                        The kitti dataset,” The International Journal of Robotics Research,
+This work has been partially supported by NSF projects                                vol. 32, no. 11, pp. 1231–1237, 2013.
+                                                                                 [21] Y. Xiao, Y. Cui, P. Savolainen, M. Siekkinen, A. Wang, L. Yang,
+CCF-2217070 and CNS-1909769, the Applications Driving                                 A. Ylä-Jääski, and S. Tarkoma, “Modeling energy consumption of data
+Architectures (ADA) Research Center, a JUMP Center co-                                transmission over wi-fi,” IEEE Transactions on Mobile Computing,
+sponsored by SRC and DARPA, and by funding and equipment                              vol. 13, no. 8, pp. 1760–1773, 2013.
+                                                                                 [22] E. J. Vergara and S. Nadjm-Tehrani, “Energybox: a trace-driven tool for
+gifts from VMware and Intel.                                                          data transmission energy consumption studies,” in European Conference
+                                                                                      on Energy Efficiency in Large Scale Distributed Systems. Springer,
+                               R EFERENCES                                            2013, pp. 19–34.
+                                                                                 [23] X. Zhang and K. G. Shin, “E-mili: Energy-minimizing idle listening in
+ [1] Timothy      Lee,     “Lidar    used     to   cost    $    75,000—here’s         wireless networks,” IEEE Transactions on Mobile Computing, vol. 11,
+     how         apple       brought        it       to      the        iphone,”      no. 9, pp. 1441–1454, 2012.
+     2020. [Online]. Available: https://arstechnica.com/cars/2020/10/            [24] M. Li, Y.-X. Wang, and D. Ramanan, “Towards streaming perception,”
+     the-technology-behind-the-iphone-lidar-may-be-coming-soon-to-cars                in European Conference on Computer Vision. Springer, 2020, pp. 473–
+ [2] Velodyne Lidar, “Velabit: Velodyne’s smallest lidar sensor,” 2021.               488.
+     [Online]. Available: https://velodynelidar.com/products/velabit/            [25] K. Mammou, P. A. Chou, D. Flynn, M. Krivokuća, O. Nakagami, and
+ [3] Intel, “Intel realsense™ lidar camera l515,” 2021. [Online]. Available:          T. Sugio, “G-pcc codec description v2,” ISO/IEC JTC1/SC29/WG11
+     https://www.intelrealsense.com/lidar-camera-l515/                                N18189, 2019.
+ [4] Apple, “Apple unveils new ipad pro with breakthrough                        [26] C. Tu, E. Takeuchi, C. Miyajima, and K. Takeda, “Compressing contin-
+     lidar scanner and brings trackpad support to ipados,” 2020.                      uous point cloud data using image compression methods,” in 2016 IEEE
+     [Online].      Available:     https://www.apple.com/newsroom/2020/03/            19th International Conference on Intelligent Transportation Systems
+     apple-unveils-new-ipad-pro-with-lidar-scanner-and-trackpad-support-in-ipados/ (ITSC). IEEE, 2016, pp. 1712–1719.
+ [5] M. Simon, K. Amende, A. Kraus, J. Honer, T. Samann, H. Kaulbersch,          [27] C. Tu, E. Takeuchi, A. Carballo, and K. Takeda, “Point cloud compres-
+     S. Milz, and H. Michael Gross, “Complexer-yolo: Real-time 3d object              sion for 3d lidar sensor using recurrent neural network with residual
+     detection and tracking on semantic point clouds,” in Proceedings of              blocks,” in 2019 International Conference on Robotics and Automation
+     the IEEE/CVF Conference on Computer Vision and Pattern Recognition               (ICRA). IEEE, 2019, pp. 3274–3280.
+     Workshops, 2019, pp. 0–0.                                                   [28] J.-K. Ahn, K.-Y. Lee, J.-Y. Sim, and C.-S. Kim, “Large-scale 3d
+ [6] M. Simony, S. Milzy, K. Amendey, and H.-M. Gross, “Complex-yolo:                 point cloud compression using adaptive radial distance prediction in
+     An euler-region-proposal for real-time 3d object detection on point              hybrid coordinate domains,” IEEE Journal of Selected Topics in Signal
+     clouds,” in Proceedings of the European Conference on Computer Vision            Processing, vol. 9, no. 3, pp. 422–434, 2014.
+     (ECCV) Workshops, 2018, pp. 0–0.                                            [29] H. Houshiar and A. Nüchter, “3d point cloud compression using
+ [7] M. Ye, S. Xu, and T. Cao, “Hvnet: Hybrid voxel network for lidar                 conventional image compression for efficient data transmission,” in
+     based 3d object detection,” in Proceedings of the IEEE/CVF conference            2015 XXV International Conference on Information, Communication
+     on computer vision and pattern recognition, 2020, pp. 1631–1640.                 and Automation Technologies (ICAT). IEEE, 2015, pp. 1–8.
+ [8] B. Yang, W. Luo, and R. Urtasun, “Pixor: Real-time 3d object detection      [30] L. Huang, S. Wang, K. Wong, J. Liu, and R. Urtasun, “Octsqueeze:
+     from point clouds,” in Proceedings of the IEEE conference on Computer            Octree-structured entropy model for lidar compression,” in Proceedings
+     Vision and Pattern Recognition, 2018, pp. 7652–7660.                             of the IEEE/CVF Conference on Computer Vision and Pattern Recogni-
+ [9] Y. Zhang, Z. Zhou, P. David, X. Yue, Z. Xi, B. Gong, and H. Foroosh,             tion, 2020, pp. 1313–1323.
+     “Polarnet: An improved grid representation for online lidar point clouds    [31] D. Graziosi, O. Nakagami, S. Kuma, A. Zaghetto, T. Suzuki, and
+     semantic segmentation,” in Proceedings of the IEEE/CVF Conference                A. Tabatabai, “An overview of ongoing point cloud compression stan-
+     on Computer Vision and Pattern Recognition, 2020, pp. 9601–9610.                 dardization activities: video-based (v-pcc) and geometry-based (g-pcc),”
+[10] W. Z. Khan, E. Ahmed, S. Hakak, I. Yaqoob, and A. Ahmed, “Edge                   APSIPA Transactions on Signal and Information Processing, vol. 9,
+     computing: A survey,” Future Generation Computer Systems, vol. 97,               2020.
+     pp. 219–235, 2019.                                                          [32] Y. Feng, S. Liu, and Y. Zhu, “Real-time spatio-temporal lidar point cloud
+[11] T. Y.-H. Chen, L. Ravindranath, S. Deng, P. Bahl, and H. Balakrishnan,           compression,” in 2020 IEEE/RSJ international conference on intelligent
+     “Glimpse: Continuous, real-time object recognition on mobile devices,”           robots and systems (IROS). IEEE, 2020, pp. 10 766–10 773.
+     in Proceedings of the 13th ACM Conference on Embedded Networked             [33] C. Tu, E. Takeuchi, A. Carballo, and K. Takeda, “Real-time streaming
+     Sensor Systems, 2015, pp. 155–168.                                               point cloud compression for 3d lidar sensor using u-net,” IEEE Access,
+[12] L. Liu, H. Li, and M. Gruteser, “Edge assisted real-time object detec-           vol. 7, pp. 113 616–113 625, 2019.
+     tion for mobile augmented reality,” in The 25th Annual International        [34] Z. Que, G. Lu, and D. Xu, “Voxelcontext-net: An octree based frame-
+     Conference on Mobile Computing and Networking, 2019, pp. 1–16.                   work for point cloud compression,” in Proceedings of the IEEE/CVF
+[13] J. Heo, K. Bhardwaj, and A. Gavrilovska, “Poster: Enabling flexible              Conference on Computer Vision and Pattern Recognition, 2021, pp.
+     edge-assisted xr,” in 2021 IEEE/ACM Symposium on Edge Computing                  6042–6051.
+     (SEC), 2021, pp. 465–467.                                                   [35] X. Sun, S. Wang, M. Wang, Z. Wang, and M. Liu, “A novel coding archi-
+[14] I. E. Richardson, H. 264 and MPEG-4 video compression: video coding              tecture for lidar point cloud sequence,” IEEE Robotics and Automation
+     for next-generation multimedia. John Wiley & Sons, 2004.                         Letters, vol. 5, no. 4, pp. 5637–5644, 2020.
+[15] A. Grange, P. De Rivaz, and J. Hunt, “Vp9 bitstream & decoding process      [36] X. Sun, H. Ma, Y. Sun, and M. Liu, “A novel point cloud compression
+     specification,” Version 0.6, March, 2016.                                        algorithm based on clustering,” IEEE Robotics and Automation Letters,
+[16] G. J. Sullivan, J.-R. Ohm, W.-J. Han, and T. Wiegand, “Overview of               vol. 4, no. 2, pp. 2132–2139, 2019.
+     the high efficiency video coding (hevc) standard,” IEEE Transactions [37] F. Song, Y. Shao, W. Gao, H. Wang, and T. Li, “Layer-wise geometry
+     on circuits and systems for video technology, vol. 22, no. 12, pp. 1649–         aggregation framework for lossless lidar point cloud compression,” IEEE
+     1668, 2012.                                                                      Transactions on Circuits and Systems for Video Technology, vol. 31,
+[17] Intel,    “Intel     quick     sync     video,     create,    edit,    and       no. 12, pp. 4603–4616, 2021.
+     share     video     in    a    flash,”    2011.    [Online].    Available:  [38] R. B. Rusu and S. Cousins, “3d is here: Point cloud library (pcl),” in
+     https://www.intel.com/content/www/us/en/architecture-and-technology/             2011 IEEE international conference on robotics and automation. IEEE,
+     quick-sync-video/quick-sync-video-general.html                                   2011, pp. 1–4.
+
+
+
+
+                                                                             13
+[39] O. Devillers and P.-M. Gandoin, “Geometric compression for interactive              [62] A. H. Lang, S. Vora, H. Caesar, L. Zhou, J. Yang, and O. Beijbom,
+     transmission,” in Proceedings Visualization 2000. VIS 2000 (Cat. No.                     “Pointpillars: Fast encoders for object detection from point clouds,”
+     00CH37145). IEEE, 2000, pp. 319–326.                                                     in Proceedings of the IEEE/CVF Conference on Computer Vision and
+[40] S. Biswas, J. Liu, K. Wong, S. Wang, and R. Urtasun, “Muscle: Multi                      Pattern Recognition, 2019, pp. 12 697–12 705.
+     sweep compression of lidar using deep entropy models,” Advances in                  [63] S. Shi, X. Wang, and H. Li, “Pointrcnn: 3d object proposal generation
+     Neural Information Processing Systems, vol. 33, pp. 22 170–22 181,                       and detection from point cloud,” in Proceedings of the IEEE/CVF
+     2020.                                                                                    conference on computer vision and pattern recognition, 2019, pp. 770–
+[41] D. T. Nguyen, M. Quach, G. Valenzise, and P. Duhamel, “Multiscale                        779.
+     deep context modeling for lossless point cloud geometry compression,”               [64] S. Shi, C. Guo, L. Jiang, Z. Wang, J. Shi, X. Wang, and H. Li, “Pv-
+     in 2021 IEEE International Conference on Multimedia & Expo Work-                         rcnn: Point-voxel feature set abstraction for 3d object detection,” in
+     shops (ICMEW). IEEE, 2021, pp. 1–6.                                                      Proceedings of the IEEE/CVF Conference on Computer Vision and
+[42] Google, “Draco: 3d data compression,” 2018. [Online]. Available:                         Pattern Recognition, 2020, pp. 10 529–10 538.
+     https://github.com/google/draco                                                     [65] Y. Yan, Y. Mao, and B. Li, “Second: Sparsely embedded convolutional
+[43] K. He, G. Gkioxari, P. Dollár, and R. Girshick, “Mask r-cnn,” in                        detection,” Sensors, vol. 18, no. 10, p. 3337, 2018.
+     Proceedings of the IEEE international conference on computer vision,                [66] J. Deng, S. Shi, P. Li, W. Zhou, Y. Zhang, and H. Li, “Voxel r-
+     2017, pp. 2961–2969.                                                                     cnn: Towards high performance voxel-based 3d object detection,” arXiv
+[44] T.-Y. Lin, M. Maire, S. Belongie, J. Hays, P. Perona, D. Ramanan,                        preprint arXiv:2012.15712, 2020.
+     P. Dollár, and C. L. Zitnick, “Microsoft coco: Common objects in                   [67] J. Zhang and S. Singh, “Loam: Lidar odometry and mapping in real-
+     context,” in European conference on computer vision. Springer, 2014,                     time.” in Robotics: Science and Systems, vol. 2, no. 9, 2014.
+     pp. 740–755.                                                                        [68] C. S. Qin Tong, “Advanced implementation of loam,” 2019. [Online].
+[45] M.-F. Chang, J. Lambert, P. Sangkloy, J. Singh, S. Bak, A. Hartnett,                     Available: https://github.com/HKUST-Aerial-Robotics/A-LOAM
+     D. Wang, P. Carr, S. Lucey, D. Ramanan et al., “Argoverse: 3d tracking              [69] C. R. Qi, L. Yi, H. Su, and L. J. Guibas, “Pointnet++: Deep hierarchical
+     and forecasting with rich maps,” in Proceedings of the IEEE/CVF                          feature learning on point sets in a metric space,” Advances in neural
+     Conference on Computer Vision and Pattern Recognition, 2019, pp.                         information processing systems, vol. 30, 2017.
+     8748–8757.                                                                          [70] B. Graham, M. Engelcke, and L. van der Maaten, “3d semantic segmen-
+[46] J. Ziv and A. Lempel, “A universal algorithm for sequential data                         tation with submanifold sparse convolutional networks,” CVPR, 2018.
+     compression,” IEEE Transactions on information theory, vol. 23, no. 3,              [71] H. Gim, D. Cho, and J. Hong, “A framework for lidar slam algorithm
+     pp. 337–343, 1977.                                                                       evaluation,” 2021. [Online]. Available: https://github.com/haeyeoni/
+[47] Z. C. Marton, R. B. Rusu, and M. Beetz, “On fast surface reconstruction                  lidar slam evaluator
+     methods for large and noisy point clouds,” in 2009 IEEE international               [72] Z. Zhang and D. Scaramuzza, “A tutorial on quantitative trajectory eval-
+     conference on robotics and automation. IEEE, 2009, pp. 3218–3223.                        uation for visual (-inertial) odometry,” in 2018 IEEE/RSJ International
+[48] L. Dagum and R. Menon, “Openmp: an industry standard api for shared-                     Conference on Intelligent Robots and Systems (IROS). IEEE, 2018, pp.
+     memory programming,” IEEE computational science and engineering,                         7244–7251.
+     vol. 5, no. 1, pp. 46–55, 1998.                                                     [73] R. Kümmerle, B. Steder, C. Dornhege, M. Ruhnke, G. Grisetti, C. Stach-
+[49] Velodyne      Lidar,     “Velodyne     lidar    hdl-64e,”    2018.     [On-              niss, and A. Kleiner, “On measuring the accuracy of slam algorithms,”
+     line]. Available: https://www.mapix.com/wp-content/uploads/2018/07/                      Autonomous Robots, vol. 27, no. 4, pp. 387–407, 2009.
+     63-9194 Rev-J HDL-64E S3 Spec-Sheet-Web.pdf                                         [74] W. Burgard, C. Stachniss, G. Grisetti, B. Steder, R. Kümmerle, C. Dorn-
+[50] M. Shevtsov, A. Soupikov, and A. Kapustin, “Highly parallel fast kd-tree                 hege, M. Ruhnke, A. Kleiner, and J. D. Tardös, “A comparison of
+     construction for interactive ray tracing of dynamic scenes,” in Computer                 slam algorithms based on a graph of relations,” in 2009 IEEE/RSJ
+     Graphics Forum, vol. 26, no. 3. Wiley Online Library, 2007, pp. 395–                     International Conference on Intelligent Robots and Systems. IEEE,
+     404.                                                                                     2009, pp. 2089–2095.
+[51] D. Wehr and R. Radkowski, “Parallel kd-tree construction on the gpu                 [75] R. Schnabel and R. Klein, “Octree-based point-cloud compression.” in
+     with an adaptive split and sort strategy,” International Journal of Parallel             PBG@ SIGGRAPH, 2006, pp. 111–120.
+     Programming, vol. 46, no. 6, pp. 1139–1156, 2018.
+[52] C. Lauterbach, M. Garland, S. Sengupta, D. Luebke, and D. Manocha,
+     “Fast bvh construction on gpus,” in Computer Graphics Forum, vol. 28,
+     no. 2. Wiley Online Library, 2009, pp. 375–384.
+[53] T. Karras, “Maximizing parallelism in the construction of bvhs, octrees,
+     and k-d trees,” in Proceedings of the Fourth ACM SIGGRAPH/Euro-
+     graphics conference on High-Performance Graphics, 2012, pp. 33–37.
+[54] Z. Wu, F. Zhao, and X. Liu, “Sah kd-tree construction on gpu,” in
+     Proceedings of the ACM SIGGRAPH Symposium on High Performance
+     Graphics, 2011, pp. 71–78.
+[55] N. Salman, M. Yvinec, and Q. Mérigot, “Feature preserving mesh
+     generation from 3d point clouds,” in Computer graphics forum, vol. 29,
+     no. 5. Wiley Online Library, 2010, pp. 1623–1632.
+[56] B. Guan, S. Lin, R. Wang, F. Zhou, X. Luo, and Y. Zheng, “Voxel-based
+     quadrilateral mesh generation from point cloud,” Multimedia Tools and
+     Applications, vol. 79, no. 29, pp. 20 561–20 578, 2020.
+[57] M. W. Marcellin, M. J. Gormish, A. Bilgin, and M. P. Boliek, “An
+     overview of jpeg-2000,” in Proceedings DCC 2000. Data Compression
+     Conference. IEEE, 2000, pp. 523–541.
+[58] FFmpeg team, “Ffmpeg, h.264 video encoding guide,” 2022. [Online].
+     Available: https://trac.ffmpeg.org/wiki/Encode/H.264
+[59] S. Shanmugasundaram and R. Lourdusamy, “A comparative study of
+     text compression algorithms,” International Journal of Wisdom Based
+     Computing, vol. 1, no. 3, pp. 68–76, 2011.
+[60] O. D. Team, “Openpcdet: An open-source toolbox for 3d object
+     detection from point clouds,” 2020. [Online]. Available: https:
+     //github.com/open-mmlab/OpenPCDet
+[61] S. Shi, Z. Wang, J. Shi, X. Wang, and H. Li, “From points to parts: 3d
+     object detection from point cloud with part-aware and part-aggregation
+     network,” IEEE transactions on pattern analysis and machine intelli-
+     gence, 2020.
+
+
+
+
+                                                                                    14
+

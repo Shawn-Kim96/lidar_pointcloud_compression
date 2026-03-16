@@ -20,7 +20,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from models.registry import MODELS
 import models.compression  # noqa: F401
 import models.backbones  # noqa: F401
-from utils.recon_pointcloud_export import reconstruct_kitti_points_with_model
+from utils.recon_pointcloud_export import (
+    project_unproject_identity_points,
+    reconstruct_kitti_points_with_model,
+)
 
 
 DEFAULT_TEACHER_AP3D_MOD_CAR_MIN = 55.0
@@ -44,7 +47,7 @@ _RunConfigLoader.add_constructor(
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Evaluate KITTI 3D detection mAP vs compression bitrate (original vs reconstructed)."
+        description="Evaluate KITTI 3D detection mAP vs compression bitrate (reference vs reconstructed)."
     )
     repo_root = Path(__file__).resolve().parents[2]
 
@@ -100,12 +103,57 @@ def parse_args():
     parser.add_argument("--fov_down_deg", type=float, default=-25.0)
     parser.add_argument("--img_h", type=int, default=64)
     parser.add_argument("--img_w", type=int, default=1024)
+    parser.add_argument(
+        "--unprojection_mode",
+        type=str,
+        default="decoded_xyz",
+        choices=("decoded_xyz", "ray"),
+        help="How reconstructed range images are mapped back into xyz for detector evaluation.",
+    )
+    parser.add_argument(
+        "--recon_quant_mode",
+        type=str,
+        default="native",
+        choices=("native", "oracle_roi"),
+        help="Reconstructed quantization behavior: native predicted importance vs oracle ROI map.",
+    )
+    parser.add_argument(
+        "--oracle_classes",
+        type=str,
+        default="Car,Pedestrian,Cyclist",
+        help="Comma-separated class names used for oracle ROI map (when recon_quant_mode=oracle_roi).",
+    )
+    parser.add_argument(
+        "--oracle_dilate_px",
+        type=int,
+        default=0,
+        help="Optional dilation radius (pixels) applied to oracle ROI map.",
+    )
+    parser.add_argument(
+        "--adaptive_bg_levels_override",
+        type=int,
+        default=-1,
+        help="If >0, override adaptive quantizer bg_levels at eval-time.",
+    )
+    parser.add_argument(
+        "--adaptive_roi_levels_override",
+        type=int,
+        default=-1,
+        help="If >0, override adaptive quantizer roi_levels at eval-time.",
+    )
+    parser.add_argument(
+        "--reference_mode",
+        type=str,
+        default="original",
+        choices=("original", "identity"),
+        help="Reference detector input used as the Track-B baseline before reconstructed evaluation.",
+    )
 
     parser.add_argument(
         "--teacher_ap3d_mod_car_min",
         type=float,
         default=DEFAULT_TEACHER_AP3D_MOD_CAR_MIN,
-        help="Quality gate threshold for original Car 3D AP moderate.",
+        help="Quality gate threshold for reference Car 3D AP moderate.",
     )
     parser.add_argument(
         "--bitrate_match_metric",
@@ -127,7 +175,7 @@ def parse_args():
     parser.add_argument(
         "--allow_ap_below_gate",
         action="store_true",
-        help="Debug-only: bypass hard AP gate failure for original detector AP3D(mod).",
+        help="Debug-only: bypass hard AP gate failure for reference detector AP3D(mod).",
     )
 
     parser.add_argument(
@@ -270,6 +318,11 @@ def _build_protocol_hash(
         "img_w": int(args.img_w),
         "fov_up_deg": float(args.fov_up_deg),
         "fov_down_deg": float(args.fov_down_deg),
+        "recon_quant_mode": str(args.recon_quant_mode),
+        "oracle_classes": str(args.oracle_classes),
+        "oracle_dilate_px": int(args.oracle_dilate_px),
+        "adaptive_bg_levels_override": int(args.adaptive_bg_levels_override),
+        "adaptive_roi_levels_override": int(args.adaptive_roi_levels_override),
         "range_threshold": float(args.range_threshold),
         "teacher_ap3d_mod_car_min": float(args.teacher_ap3d_mod_car_min),
         "bitrate_match_metric": str(args.bitrate_match_metric),
@@ -361,6 +414,8 @@ def _infer_model_family(config: Dict[str, Any]) -> str:
 
     if quant_mode == "uniform":
         return f"Uniform Baseline ({backbone_tag})"
+    if quant_mode == "none":
+        return f"No-Quant Autoencoder ({backbone_tag})"
 
     w_distill = _safe_float(config.get("loss", {}).get("w_distill", 0.0))
     head_type = str(model_cfg.get("head_config", {}).get("head_type", "basic")).lower()
@@ -487,6 +542,29 @@ def _normalize_sample_id(sample_id: Any) -> str:
     if sid.isdigit():
         return sid.zfill(6)
     return sid
+
+
+def _parse_class_filter_from_arg(csv_text: str) -> Optional[List[str]]:
+    classes = [x.strip() for x in str(csv_text).split(",") if x.strip()]
+    return classes if classes else None
+
+
+def _build_annos_lookup(dataset: Any) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    infos = getattr(dataset, "kitti_infos", None)
+    if not isinstance(infos, list):
+        return out
+    for info in infos:
+        if not isinstance(info, dict):
+            continue
+        sid = _extract_lidar_idx_from_info(info)
+        if sid is None:
+            continue
+        annos = info.get("annos", {})
+        if not isinstance(annos, dict):
+            annos = {}
+        out[sid] = annos
+    return out
 
 
 def _extract_frame_ids(batch_dict: Dict[str, Any], fallback_start: int) -> List[str]:
@@ -657,7 +735,7 @@ def _update_table_b_markdown(paper_table_path: Path, rows: Sequence[Dict[str, An
     start_marker = "<!-- BEGIN_TABLE_B -->"
     end_marker = "<!-- END_TABLE_B -->"
 
-    original_rows = [r for r in rows if str(r.get("mode", "")).lower() == "original"]
+    reference_rows = [r for r in rows if str(r.get("mode", "")).lower() != "reconstructed"]
     recon_rows = [r for r in rows if str(r.get("mode", "")).lower() == "reconstructed"]
     if not recon_rows:
         return
@@ -665,29 +743,32 @@ def _update_table_b_markdown(paper_table_path: Path, rows: Sequence[Dict[str, An
     def _pair_key(r: Dict[str, Any]) -> Tuple[str, str]:
         return str(r.get("model_family", "")), str(r.get("run_dir", ""))
 
-    original_by_key: Dict[Tuple[str, str], Dict[str, Any]] = {
-        _pair_key(r): r for r in original_rows
+    reference_by_key: Dict[Tuple[str, str], Dict[str, Any]] = {
+        _pair_key(r): r for r in reference_rows
     }
+    reference_modes = sorted({str(r.get("mode", "")).lower() for r in reference_rows if str(r.get("mode", "")).strip()})
+    reference_mode = reference_modes[0] if len(reference_modes) == 1 else "reference"
+    reference_label = "Identity" if reference_mode == "identity" else "Original"
 
     lines = []
-    lines.append("## Table B. KITTI Detector Endpoint (Official 3D AP, Original vs Reconstructed Pair)")
+    lines.append("## Table B. KITTI Detector Endpoint (Official 3D AP, Reference vs Reconstructed Pair)")
     lines.append("")
-    lines.append("- `mode=original`: detector AP on original KITTI point clouds.")
+    lines.append(f"- `mode={reference_mode}`: detector AP on the chosen reference baseline.")
     lines.append("- `mode=reconstructed`: detector AP on compression-reconstructed point clouds.")
-    lines.append("- Rows are paired by the same `run_dir` to make `original vs reconstructed` comparison explicit.")
+    lines.append("- Rows are paired by the same `run_dir` to make `reference vs reconstructed` comparison explicit.")
     lines.append("")
-    lines.append("| Model family | Frames | Original Car 3D AP (mod) | Reconstructed Car 3D AP (mod) | Original mAP3D(mod) | Reconstructed mAP3D(mod) | map_drop_vs_original | Reconstructed `bpp_entropy_mean` | fairness_tag |")
+    lines.append(f"| Model family | Frames | {reference_label} Car 3D AP (mod) | Reconstructed Car 3D AP (mod) | {reference_label} mAP3D(mod) | Reconstructed mAP3D(mod) | map_drop_vs_reference | Reconstructed `bpp_entropy_mean` | fairness_tag |")
     lines.append("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |")
     for recon in recon_rows:
-        orig = original_by_key.get(_pair_key(recon), {})
-        frames = int(recon.get("frames", orig.get("frames", 0)) or 0)
+        ref = reference_by_key.get(_pair_key(recon), {})
+        frames = int(recon.get("frames", ref.get("frames", 0)) or 0)
         lines.append(
             "| "
             + f"{recon.get('model_family','')} | "
             + f"{frames} | "
-            + f"{_safe_float(orig.get('ap3d_car_mod')):.2f} | "
+            + f"{_safe_float(ref.get('ap3d_car_mod')):.2f} | "
             + f"{_safe_float(recon.get('ap3d_car_mod')):.2f} | "
-            + f"{_safe_float(orig.get('map3d_mod_mean')):.2f} | "
+            + f"{_safe_float(ref.get('map3d_mod_mean')):.2f} | "
             + f"{_safe_float(recon.get('map3d_mod_mean')):.2f} | "
             + f"{_safe_float(recon.get('map_drop_vs_original')):.2f} | "
             + f"{_safe_float(recon.get('bpp_entropy_mean')):.4f} | "
@@ -737,7 +818,7 @@ def _evaluate_single_run(
     summary_rows: List[Dict[str, Any]] = []
     detail_rows: List[Dict[str, Any]] = []
 
-    # Evaluate original once and reuse across runs.
+    # Evaluate the selected reference baseline once and reuse across runs.
     if original_eval_cache is None:
         cfg, dataset, dataloader, _, detector_model, load_data_to_gpu = _build_openpcdet_eval_objects(
             cfg_file=cfg_file,
@@ -750,6 +831,31 @@ def _evaluate_single_run(
             workers=args.workers,
         )
         _maybe_limit_dataset_infos(dataset, args.max_frames)
+
+        if args.reference_mode == "identity":
+            if not hasattr(dataset, "get_lidar"):
+                raise RuntimeError("OpenPCDet dataset does not expose get_lidar; cannot patch identity baseline.")
+            original_get_lidar = dataset.get_lidar
+            identity_cache: Dict[str, np.ndarray] = {}
+
+            def _identity_get_lidar(sample_idx):
+                sid = _normalize_sample_id(sample_idx)
+                if sid in identity_cache:
+                    return identity_cache[sid]
+                raw_points = original_get_lidar(sample_idx)
+                identity_points = project_unproject_identity_points(
+                    raw_points,
+                    img_h=int(args.img_h),
+                    img_w=int(args.img_w),
+                    fov_up_deg=float(args.fov_up_deg),
+                    fov_down_deg=float(args.fov_down_deg),
+                    range_threshold=float(args.range_threshold),
+                    unprojection_mode=str(args.unprojection_mode),
+                )
+                identity_cache[sid] = np.asarray(identity_points, dtype=np.float32)
+                return identity_cache[sid]
+
+            dataset.get_lidar = _identity_get_lidar
 
         det_annos = []
         frame_count = 0
@@ -778,9 +884,10 @@ def _evaluate_single_run(
                         "score": _prediction_score(pred),
                         "pred_count": _prediction_count(pred),
                         "latency_ms": latency_per_sample,
-                        "mode": "original",
+                        "mode": str(args.reference_mode),
+                        "reference_mode": str(args.reference_mode),
                         "model_family": "Detector Reference",
-                        "run_dir": "kitti_original_reference",
+                        "run_dir": f"kitti_{args.reference_mode}_reference",
                         "sample_id": frame_ids[i] if i < len(frame_ids) else str(frame_idx),
                     }
                 )
@@ -813,18 +920,25 @@ def _evaluate_single_run(
             "ap3d_cyc_mod": cyc_mod,
             "map3d_mod_mean": map_mod,
             "result_str": result_str,
+            "reference_mode": str(args.reference_mode),
         }
 
-    # Original summary row (replicated by run for table consistency).
+    # Reference summary row (replicated by run for table consistency).
     summary_rows.append(
         {
             "model_family": model_family,
             "run_dir": str(run_dir),
-            "mode": "original",
+            "mode": str(args.reference_mode),
+            "reference_mode": str(args.reference_mode),
             "split": str(args.split),
             "split_manifest": str(protocol_meta["split_manifest"]),
             "split_manifest_hash": str(protocol_meta["split_manifest_hash"]),
             "protocol_hash": str(protocol_meta["protocol_hash"]),
+            "recon_quant_mode": str(args.recon_quant_mode),
+            "oracle_classes": str(args.oracle_classes),
+            "oracle_dilate_px": int(args.oracle_dilate_px),
+            "adaptive_bg_levels_override": int(args.adaptive_bg_levels_override),
+            "adaptive_roi_levels_override": int(args.adaptive_roi_levels_override),
             "frames": int(original_eval_cache["frames"]),
             "bpp_entropy_mean": float("nan"),
             "bpp_eq_mean": float("nan"),
@@ -837,11 +951,11 @@ def _evaluate_single_run(
             "map3d_mod_mean": _safe_float(original_eval_cache["map3d_mod_mean"]),
             "map_drop_vs_original": 0.0,
             "fallback_count": 0,
-            "fairness_tag": "reference_original",
+            "fairness_tag": f"reference_{args.reference_mode}",
         }
     )
 
-    # Teacher quality gate (on original detector AP).
+    # Teacher quality gate (on the selected reference detector AP).
     if _safe_float(original_eval_cache["ap3d_car_mod"]) < float(args.teacher_ap3d_mod_car_min):
         gate_msg = (
             "teacher_ap3d_mod_car below threshold: "
@@ -867,6 +981,14 @@ def _evaluate_single_run(
         workers=args.workers,
     )
     _maybe_limit_dataset_infos(dataset, args.max_frames)
+    annos_lookup = _build_annos_lookup(dataset)
+    oracle_classes = _parse_class_filter_from_arg(args.oracle_classes)
+    bg_levels_override = (
+        int(args.adaptive_bg_levels_override) if int(args.adaptive_bg_levels_override) > 0 else None
+    )
+    roi_levels_override = (
+        int(args.adaptive_roi_levels_override) if int(args.adaptive_roi_levels_override) > 0 else None
+    )
 
     # Patch dataset.get_lidar to feed reconstructed point cloud.
     if not hasattr(dataset, "get_lidar"):
@@ -884,6 +1006,10 @@ def _evaluate_single_run(
         if sid in recon_cache:
             return recon_cache[sid]
         raw_points = original_get_lidar(sample_idx)
+
+        ann = annos_lookup.get(sid, {})
+        gt_boxes_lidar = ann.get("gt_boxes_lidar", None)
+        gt_names = ann.get("name", None)
         recon_points, rate_metrics, _ = reconstruct_kitti_points_with_model(
             model=model,
             device=compression_device,
@@ -896,6 +1022,14 @@ def _evaluate_single_run(
             fov_down_deg=float(args.fov_down_deg),
             range_threshold=float(args.range_threshold),
             uniform_bits_fallback=uniform_bits,
+            unprojection_mode=str(args.unprojection_mode),
+            quant_mode=str(args.recon_quant_mode),
+            oracle_gt_boxes_lidar=gt_boxes_lidar,
+            oracle_gt_names=gt_names,
+            oracle_classes=oracle_classes,
+            oracle_dilate_px=int(args.oracle_dilate_px),
+            adaptive_bg_levels_override=bg_levels_override,
+            adaptive_roi_levels_override=roi_levels_override,
         )
         invalid_reason = ""
         if recon_points is None or recon_points.size == 0:
@@ -975,6 +1109,7 @@ def _evaluate_single_run(
                     "pred_count": _prediction_count(pred),
                     "latency_ms": latency_per_sample,
                     "mode": "reconstructed",
+                    "reference_mode": str(args.reference_mode),
                     "model_family": model_family,
                     "run_dir": str(run_dir),
                     "sample_id": sid,
@@ -1010,10 +1145,16 @@ def _evaluate_single_run(
             "model_family": model_family,
             "run_dir": str(run_dir),
             "mode": "reconstructed",
+            "reference_mode": str(args.reference_mode),
             "split": str(args.split),
             "split_manifest": str(protocol_meta["split_manifest"]),
             "split_manifest_hash": str(protocol_meta["split_manifest_hash"]),
             "protocol_hash": str(protocol_meta["protocol_hash"]),
+            "recon_quant_mode": str(args.recon_quant_mode),
+            "oracle_classes": str(args.oracle_classes),
+            "oracle_dilate_px": int(args.oracle_dilate_px),
+            "adaptive_bg_levels_override": int(args.adaptive_bg_levels_override),
+            "adaptive_roi_levels_override": int(args.adaptive_roi_levels_override),
             "frames": int(frame_count),
             "bpp_entropy_mean": bpp_entropy_mean,
             "bpp_eq_mean": bpp_eq_mean,
@@ -1031,7 +1172,12 @@ def _evaluate_single_run(
     )
 
     print(
-        f"[{run_dir.name}] original_map3d_mod={_safe_float(original_eval_cache['map3d_mod_mean']):.3f} "
+        f"[{run_dir.name}] reference_mode={args.reference_mode} "
+        f"recon_quant_mode={args.recon_quant_mode} "
+        f"oracle_dilate_px={int(args.oracle_dilate_px)} "
+        f"bg_override={int(args.adaptive_bg_levels_override)} "
+        f"roi_override={int(args.adaptive_roi_levels_override)} "
+        f"reference_map3d_mod={_safe_float(original_eval_cache['map3d_mod_mean']):.3f} "
         f"recon_map3d_mod={map_mod:.3f} bpp_entropy={bpp_entropy_mean:.4f} "
         f"fallback_count={int(fallback_count)}"
     )
@@ -1113,10 +1259,16 @@ def main():
         "model_family",
         "run_dir",
         "mode",
+        "reference_mode",
         "split",
         "split_manifest",
         "split_manifest_hash",
         "protocol_hash",
+        "recon_quant_mode",
+        "oracle_classes",
+        "oracle_dilate_px",
+        "adaptive_bg_levels_override",
+        "adaptive_roi_levels_override",
         "frames",
         "bpp_entropy_mean",
         "bpp_eq_mean",
@@ -1137,6 +1289,7 @@ def main():
         "pred_count",
         "latency_ms",
         "mode",
+        "reference_mode",
         "model_family",
         "run_dir",
         "sample_id",
@@ -1153,7 +1306,12 @@ def main():
         "Metadata defaults: "
         f"teacher_ap3d_mod_car_min={float(args.teacher_ap3d_mod_car_min):.3f}, "
         f"bitrate_match_metric={args.bitrate_match_metric}, "
-        f"bitrate_pair_max_gap={float(args.bitrate_pair_max_gap):.3f}"
+        f"bitrate_pair_max_gap={float(args.bitrate_pair_max_gap):.3f}, "
+        f"recon_quant_mode={args.recon_quant_mode}, "
+        f"oracle_classes={args.oracle_classes}, "
+        f"oracle_dilate_px={int(args.oracle_dilate_px)}, "
+        f"adaptive_bg_levels_override={int(args.adaptive_bg_levels_override)}, "
+        f"adaptive_roi_levels_override={int(args.adaptive_roi_levels_override)}"
     )
     print(
         "Protocol metadata: "

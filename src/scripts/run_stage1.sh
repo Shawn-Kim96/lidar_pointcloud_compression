@@ -6,7 +6,6 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --gres=gpu:1
 #SBATCH --time=24:00:00
 #SBATCH --array=0-3
 
@@ -24,6 +23,23 @@ else
   PYTHON_ENV_DESC="python:$(command -v python)"
 fi
 
+# Ensure each Slurm task binds to its assigned GPU, avoiding shared cuda:0 collisions.
+if [[ -z "${CUDA_VISIBLE_DEVICES:-}" ]]; then
+  RAW_JOB_GPUS="${SLURM_STEP_GPUS:-${SLURM_JOB_GPUS:-}}"
+  if [[ -n "${RAW_JOB_GPUS}" ]]; then
+    FIRST_GPU="${RAW_JOB_GPUS%%,*}"
+    if [[ "${FIRST_GPU}" == *"["* ]]; then
+      FIRST_GPU="${FIRST_GPU#*[}"
+      FIRST_GPU="${FIRST_GPU%%]*}"
+    fi
+    FIRST_GPU="${FIRST_GPU//[^0-9]/}"
+    if [[ -n "${FIRST_GPU}" ]]; then
+      export CUDA_VISIBLE_DEVICES="${FIRST_GPU}"
+    fi
+  fi
+fi
+echo "[slurm-gpu] job_gpus=${SLURM_JOB_GPUS:-unset} step_gpus=${SLURM_STEP_GPUS:-unset} cuda_visible_devices=${CUDA_VISIBLE_DEVICES:-unset}"
+
 # Define Experiment Arrays
 # We sweep over Backbone + Learning Rate
 BACKBONES=("darknet" "resnet" "darknet" "resnet")
@@ -34,6 +50,8 @@ EPOCHS=${EPOCHS:-50}
 BATCH_SIZE=${BATCH_SIZE:-4}
 NUM_WORKERS=${NUM_WORKERS:-4}
 MAX_TRAIN_FRAMES=${MAX_TRAIN_FRAMES:-0}
+TRAIN_MAX_RETRIES=${TRAIN_MAX_RETRIES:-3}
+TRAIN_RETRY_SLEEP_SEC=${TRAIN_RETRY_SLEEP_SEC:-30}
 DATASET_TYPE=${DATASET_TYPE:-kitti3dobject}
 if [[ "${DATASET_TYPE}" == "kitti3dobject" ]]; then
   DATA_ROOT=${DATA_ROOT:-data/dataset/kitti3dobject}
@@ -206,6 +224,24 @@ TRAIN_CMD=(
 if [[ -n "${KITTI_IMAGESET_FILE}" ]]; then
     TRAIN_CMD+=(--kitti_imageset_file "${KITTI_IMAGESET_FILE}")
 fi
-"${TRAIN_CMD[@]}"
+attempt=1
+while true; do
+  set +e
+  "${TRAIN_CMD[@]}"
+  train_status=$?
+  set -e
+  if [[ "${train_status}" == "0" ]]; then
+    break
+  fi
+  if [[ "${attempt}" -lt "${TRAIN_MAX_RETRIES}" ]] && \
+     grep -qiE "CUDA-capable device\\(s\\) is/are busy or unavailable|CUDA error: out of memory" "logs/${LOG_PREFIX}.err"; then
+    echo "[stage1][warn] transient CUDA failure (attempt ${attempt}/${TRAIN_MAX_RETRIES}); retrying in ${TRAIN_RETRY_SLEEP_SEC}s ..."
+    sleep "${TRAIN_RETRY_SLEEP_SEC}"
+    attempt=$((attempt + 1))
+    continue
+  fi
+  echo "Error: stage1 training failed (status=${train_status}) after ${attempt} attempt(s)." >&2
+  exit "${train_status}"
+done
 
 echo "Done Experiment $SLURM_ARRAY_TASK_ID"

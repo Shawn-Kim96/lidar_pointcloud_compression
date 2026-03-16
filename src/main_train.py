@@ -21,13 +21,39 @@ def _safe_token(value):
     return "".join(ch for ch in text if ch.isalnum() or ch in ("-", "_", "."))
 
 
+def _parse_int_list(csv_text: str):
+    return [int(v.strip()) for v in str(csv_text).split(",") if v.strip()]
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="LiDAR Compression Training")
     
     # Model Config
     parser.add_argument("--backbone", type=str, default="darknet", help="resnet or darknet")
-    parser.add_argument("--quantizer_mode", type=str, default="adaptive", choices=("adaptive", "uniform"))
+    parser.add_argument("--quantizer_mode", type=str, default="adaptive", choices=("adaptive", "uniform", "none"))
     parser.add_argument("--quant_bits", type=int, default=8, help="Uniform quantizer bits when quantizer_mode=uniform.")
+    parser.add_argument("--latent_channels", type=int, default=64)
+    parser.add_argument("--base_channels", type=int, default=64)
+    parser.add_argument("--blocks_per_stage", type=int, default=1)
+    parser.add_argument("--position_branch", action="store_true", help="Enable xyz side-branch encoder.")
+    parser.add_argument("--position_latent_channels", type=int, default=32)
+    parser.add_argument(
+        "--decoder_type",
+        type=str,
+        default="deconv",
+        choices=("deconv", "coord_conditioned", "skip_unet", "skip_coord_conditioned"),
+        help="Decoder family. skip_* uses bilinear upsampling with encoder skip features.",
+    )
+    parser.add_argument("--implicit_hidden_channels", type=int, default=128)
+    parser.add_argument("--pillar_side_branch", action="store_true", help="Enable raw-point pillar/BEV side stream.")
+    parser.add_argument("--pillar_max_raw_points", type=int, default=150000)
+    parser.add_argument("--pillar_size_x", type=float, default=0.24)
+    parser.add_argument("--pillar_size_y", type=float, default=0.24)
+    parser.add_argument("--pillar_pfn_hidden_channels", type=int, default=64)
+    parser.add_argument("--pillar_pfn_out_channels", type=int, default=128)
+    parser.add_argument("--pillar_bev_channels", type=str, default="128,128,192,256")
+    parser.add_argument("--pillar_bev_blocks", type=str, default="2,2,2,3")
+    parser.add_argument("--pillar_fpn_channels", type=int, default=128)
     
     # Teacher Config
     parser.add_argument(
@@ -73,6 +99,10 @@ def parse_args():
     )
     parser.add_argument("--save_dir", type=str, default=None)
     parser.add_argument("--max_train_frames", type=int, default=0, help="If >0, train on first N frames for fast ablations.")
+    parser.add_argument("--img_h", type=int, default=64)
+    parser.add_argument("--img_w", type=int, default=1024)
+    parser.add_argument("--fov_up_deg", type=float, default=3.0)
+    parser.add_argument("--fov_down_deg", type=float, default=-25.0)
     
     # Quantizer Config
     parser.add_argument("--roi_levels", type=int, default=256)
@@ -92,6 +122,17 @@ def parse_args():
     parser.add_argument("--lambda_importance", type=float, default=0.5)
     parser.add_argument("--lambda_imp_separation", type=float, default=0.0)
     parser.add_argument("--imp_separation_margin", type=float, default=0.05)
+    parser.add_argument(
+        "--recon_loss_mode",
+        type=str,
+        default="mse",
+        choices=("mse", "masked_channel_weighted"),
+        help="Reconstruction loss type. masked_channel_weighted emphasizes valid xyz/range fidelity.",
+    )
+    parser.add_argument("--recon_range_weight", type=float, default=1.0)
+    parser.add_argument("--recon_xyz_weight", type=float, default=1.0)
+    parser.add_argument("--recon_remission_weight", type=float, default=1.0)
+    parser.add_argument("--lambda_ray_consistency", type=float, default=0.0)
 
     parser.add_argument("--loss_recipe", type=str, default="legacy", choices=("legacy", "balanced_v1", "balanced_v2"))
     parser.add_argument(
@@ -144,6 +185,16 @@ def parse_args():
         choices=("basic", "multiscale", "pp_lite", "bifpn", "deformable_msa", "dynamic", "rangeformer", "frnet"),
     )
     parser.add_argument("--importance_hidden_channels", type=int, default=32)
+
+    parser.add_argument(
+        "--feature_fusion_variant",
+        type=str,
+        default="none",
+        choices=("none", "bifpn", "deformable_msa", "dynamic", "rangeformer", "frnet"),
+        help="Optional multiscale latent fusion block before quantization.",
+    )
+    parser.add_argument("--feature_fusion_hidden_channels", type=int, default=128)
+    parser.add_argument("--decoder_post_refine_blocks", type=int, default=0)
     
     # Toggles
     parser.add_argument("--no_teacher", action="store_true", help="Disable teacher for Stage 1 training")
@@ -156,6 +207,9 @@ def _print_experiment_summary(args, device, save_dir):
     if args.quantizer_mode == "uniform":
         stage_label = "0"
         mode_label = "uniform"
+    elif args.quantizer_mode == "none":
+        stage_label = "0.5"
+        mode_label = "noquant"
     else:
         stage_label = "1" if args.no_teacher else "2"
         mode_label = "baseline" if args.no_teacher else "distill"
@@ -184,8 +238,33 @@ def _print_experiment_summary(args, device, save_dir):
     print(f"roi_levels: {args.roi_levels}")
     print(f"bg_levels: {args.bg_levels}")
     print(f"roi_target_mode: {args.roi_target_mode}")
+    print(f"latent_channels: {args.latent_channels}")
+    print(f"base_channels: {args.base_channels}")
+    print(f"blocks_per_stage: {args.blocks_per_stage}")
+    print(f"position_branch: {args.position_branch}")
+    print(f"position_latent_channels: {args.position_latent_channels}")
+    print(f"decoder_type: {args.decoder_type}")
+    print(f"implicit_hidden_channels: {args.implicit_hidden_channels}")
+    print(f"pillar_side_branch: {args.pillar_side_branch}")
+    print(f"pillar_max_raw_points: {args.pillar_max_raw_points}")
+    print(f"pillar_size: ({args.pillar_size_x}, {args.pillar_size_y})")
+    print(f"pillar_pfn_hidden_channels: {args.pillar_pfn_hidden_channels}")
+    print(f"pillar_pfn_out_channels: {args.pillar_pfn_out_channels}")
+    print(f"pillar_bev_channels: {args.pillar_bev_channels}")
+    print(f"pillar_bev_blocks: {args.pillar_bev_blocks}")
+    print(f"pillar_fpn_channels: {args.pillar_fpn_channels}")
     print(f"max_train_frames: {args.max_train_frames if args.max_train_frames > 0 else 'all'}")
+    print(f"range_image_hw: {args.img_h}x{args.img_w}")
+    print(f"range_image_fov: up={args.fov_up_deg}, down={args.fov_down_deg}")
     print(f"loss_recipe: {args.loss_recipe}")
+    print(f"recon_loss_mode: {args.recon_loss_mode}")
+    print(
+        "recon_channel_weights: "
+        f"range={args.recon_range_weight}, "
+        f"xyz={args.recon_xyz_weight}, "
+        f"remission={args.recon_remission_weight}"
+    )
+    print(f"lambda_ray_consistency: {args.lambda_ray_consistency}")
     print(f"rate_loss_mode: {args.rate_loss_mode or 'auto_by_recipe'}")
     print(f"importance_loss_mode: {args.importance_loss_mode or 'auto_by_recipe'}")
     print(f"importance_pos_weight_mode: {args.importance_pos_weight_mode}")
@@ -204,6 +283,9 @@ def _print_experiment_summary(args, device, save_dir):
     print(f"distill_teacher_score_weight: {args.distill_teacher_score_weight}")
     print(f"importance_head_type: {args.importance_head_type}")
     print(f"importance_hidden_channels: {args.importance_hidden_channels}")
+    print(f"feature_fusion_variant: {args.feature_fusion_variant}")
+    print(f"feature_fusion_hidden_channels: {args.feature_fusion_hidden_channels}")
+    print(f"decoder_post_refine_blocks: {args.decoder_post_refine_blocks}")
     print(f"teacher_proxy_ckpt: {args.teacher_proxy_ckpt if args.teacher_proxy_ckpt else 'none'}")
     print(f"teacher_score_topk_ratio: {args.teacher_score_topk_ratio}")
     print(f"started_at: {time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
@@ -224,19 +306,35 @@ def main():
     
     # Dataloader
     if args.dataset_type == "semantickitti":
+        dataset_cfg = {
+            "fov_up": args.fov_up_deg,
+            "fov_down": args.fov_down_deg,
+            "img_height": args.img_h,
+            "img_width": args.img_w,
+        }
         train_dataset = SemanticKittiDataset(
             root_dir=args.data_root,
             sequences=["00", "01", "02", "03", "04", "05", "06", "07", "09", "10"],
+            config=dataset_cfg,
             return_roi_mask=True
         )
     elif args.dataset_type == "kitti3dobject":
         roi_classes = [c.strip() for c in args.kitti_roi_classes.split(",") if c.strip()]
+        dataset_cfg = {
+            "fov_up": args.fov_up_deg,
+            "fov_down": args.fov_down_deg,
+            "img_height": args.img_h,
+            "img_width": args.img_w,
+        }
         train_dataset = KittiObjectRangeDataset(
             root_dir=args.data_root,
             split=args.kitti_split,
             imageset_file=args.kitti_imageset_file or None,
+            config=dataset_cfg,
             return_roi_mask=True,
             roi_classes=roi_classes,
+            return_raw_points=args.pillar_side_branch,
+            max_raw_points=args.pillar_max_raw_points,
         )
     else:
         raise ValueError(f"Unsupported dataset_type: {args.dataset_type}")
@@ -274,13 +372,17 @@ def main():
     decoder_stages = 5 if args.backbone == "darknet" else 4
     if args.backbone == "darknet":
         backbone_config["layers"] = (1, 1, 2, 2, 1)
+        backbone_config["base_channels"] = args.base_channels
     else:
         # Encoder in autoencoder.py expects stage count/blocks, not "layers".
-        backbone_config["latent_channels"] = 64
+        backbone_config["latent_channels"] = args.latent_channels
+        backbone_config["base_channels"] = args.base_channels
         backbone_config["num_stages"] = 4
-        backbone_config["blocks_per_stage"] = 1
+        backbone_config["blocks_per_stage"] = args.blocks_per_stage
 
     # Config Construction
+    pillar_bev_channels = _parse_int_list(args.pillar_bev_channels)
+    pillar_bev_blocks = _parse_int_list(args.pillar_bev_blocks)
     config = {
         "model": {
             "name": "lidar_compression",
@@ -288,22 +390,67 @@ def main():
             "quantizer_config": {
                 "mode": args.quantizer_mode,
                 "uniform_bits": args.quant_bits,
+                "latent_channels": args.latent_channels,
                 "roi_levels": args.roi_levels,
                 "bg_levels": args.bg_levels,
                 "use_ste": True
             },
             "decoder_config": {
-                "latent_channels": 64,
+                "latent_channels": args.latent_channels,
                 "out_channels": 5,
-                "num_stages": decoder_stages
+                "base_channels": args.base_channels,
+                "num_stages": decoder_stages,
+                "post_refine_blocks": args.decoder_post_refine_blocks,
+                "decoder_type": args.decoder_type,
+                "coord_channels": 5,
+                "implicit_hidden_channels": args.implicit_hidden_channels,
+                "fov_up_deg": args.fov_up_deg,
+                "fov_down_deg": args.fov_down_deg,
             },
+            "position_branch_config": (
+                {
+                    "enabled": True,
+                    "in_channels": 3,
+                    "latent_channels": args.position_latent_channels,
+                }
+                if args.position_branch
+                else None
+            ),
             "head_config": (
                 None
-                if args.quantizer_mode == "uniform"
+                if args.quantizer_mode in ("uniform", "none")
                 else {
                     "hidden_channels": args.importance_hidden_channels,
                     "activation": "relu",
                     "head_type": args.importance_head_type,
+                }
+            ),
+            "feature_fusion_config": (
+                None
+                if args.feature_fusion_variant == "none"
+                else {
+                    "enabled": True,
+                    "variant": args.feature_fusion_variant,
+                    "hidden_channels": args.feature_fusion_hidden_channels,
+                    "activation": "silu",
+                    "norm": "group",
+                }
+            ),
+            "pillar_side_config": (
+                None
+                if not args.pillar_side_branch
+                else {
+                    "enabled": True,
+                    "point_cloud_range": [0.0, -40.0, -3.0, 70.4, 40.0, 1.0],
+                    "pillar_size": [args.pillar_size_x, args.pillar_size_y],
+                    "pfn_hidden_channels": args.pillar_pfn_hidden_channels,
+                    "pfn_out_channels": args.pillar_pfn_out_channels,
+                    "bev_channels": pillar_bev_channels,
+                    "bev_blocks": pillar_bev_blocks,
+                    "fpn_channels": args.pillar_fpn_channels,
+                    "max_raw_points": args.pillar_max_raw_points,
+                    "norm": "batch",
+                    "activation": "silu",
                 }
             ),
         },
@@ -316,6 +463,12 @@ def main():
                 "score_topk_ratio": args.teacher_score_topk_ratio,
             }
         },
+        "data": {
+            "img_height": args.img_h,
+            "img_width": args.img_w,
+            "fov_up_deg": args.fov_up_deg,
+            "fov_down_deg": args.fov_down_deg,
+        },
         "train": {
             "lr": args.lr,
             "weight_decay": 1e-4,
@@ -327,6 +480,11 @@ def main():
             "w_rate": args.lambda_rate,
             "w_importance": args.lambda_importance,
             "w_imp_separation": args.lambda_imp_separation,
+            "recon_loss_mode": args.recon_loss_mode,
+            "recon_range_weight": args.recon_range_weight,
+            "recon_xyz_weight": args.recon_xyz_weight,
+            "recon_remission_weight": args.recon_remission_weight,
+            "w_ray_consistency": args.lambda_ray_consistency,
             "recipe": args.loss_recipe,
             "rate_loss_mode": args.rate_loss_mode,
             "importance_loss_mode": args.importance_loss_mode,

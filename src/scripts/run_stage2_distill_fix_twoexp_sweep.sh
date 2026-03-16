@@ -6,7 +6,6 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --gres=gpu:1
 #SBATCH --time=36:00:00
 #SBATCH --array=0-11
 
@@ -32,6 +31,23 @@ else
   PYTHON_ENV_DESC="python:$(command -v python)"
 fi
 
+# Ensure each Slurm task binds to its assigned GPU, avoiding shared cuda:0 collisions.
+if [[ -z "${CUDA_VISIBLE_DEVICES:-}" ]]; then
+  RAW_JOB_GPUS="${SLURM_STEP_GPUS:-${SLURM_JOB_GPUS:-}}"
+  if [[ -n "${RAW_JOB_GPUS}" ]]; then
+    FIRST_GPU="${RAW_JOB_GPUS%%,*}"
+    if [[ "${FIRST_GPU}" == *"["* ]]; then
+      FIRST_GPU="${FIRST_GPU#*[}"
+      FIRST_GPU="${FIRST_GPU%%]*}"
+    fi
+    FIRST_GPU="${FIRST_GPU//[^0-9]/}"
+    if [[ -n "${FIRST_GPU}" ]]; then
+      export CUDA_VISIBLE_DEVICES="${FIRST_GPU}"
+    fi
+  fi
+fi
+echo "[slurm-gpu] job_gpus=${SLURM_JOB_GPUS:-unset} step_gpus=${SLURM_STEP_GPUS:-unset} cuda_visible_devices=${CUDA_VISIBLE_DEVICES:-unset}"
+
 IDX=${SLURM_ARRAY_TASK_ID:-0}
 
 BACKBONE=${BACKBONE:-resnet}
@@ -41,6 +57,9 @@ EPOCHS=${EPOCHS:-80}
 BATCH_SIZE=${BATCH_SIZE:-4}
 NUM_WORKERS=${NUM_WORKERS:-4}
 MAX_TRAIN_FRAMES=${MAX_TRAIN_FRAMES:-0}
+MIN_GPU_MEM_GB=${MIN_GPU_MEM_GB:-0}
+TRAIN_MAX_RETRIES=${TRAIN_MAX_RETRIES:-3}
+TRAIN_RETRY_SLEEP_SEC=${TRAIN_RETRY_SLEEP_SEC:-30}
 
 QUANTIZER_MODE=${QUANTIZER_MODE:-adaptive}
 QUANT_BITS=${QUANT_BITS:-8}
@@ -67,6 +86,14 @@ DISTILL_LOGIT_WEIGHT=${DISTILL_LOGIT_WEIGHT:-1.0}
 
 IMPORTANCE_HEAD_TYPE=${IMPORTANCE_HEAD_TYPE:-pp_lite}
 IMPORTANCE_HIDDEN_CHANNELS=${IMPORTANCE_HIDDEN_CHANNELS:-64}
+
+if [[ "${MIN_GPU_MEM_GB}" == "0" ]]; then
+  if [[ "${IMPORTANCE_HIDDEN_CHANNELS}" -ge 96 ]]; then
+    MIN_GPU_MEM_GB=30
+  else
+    MIN_GPU_MEM_GB=14
+  fi
+fi
 
 CASE_TAGS=("energy_pool_16x32" "energy_pool_16x32_scoregate015")
 DISTILL_FEATURE_SOURCES=("energy_map" "energy_map")
@@ -153,50 +180,102 @@ echo "slurm_array_task_id: ${SLURM_ARRAY_TASK_ID:-n/a}"
 echo "started_at: $(date '+%Y-%m-%d %H:%M:%S %Z')"
 echo "============================================================"
 
+set +e
+GPU_GUARD_OUT="$("${PYTHON_RUNNER[@]}" - "${MIN_GPU_MEM_GB}" <<'PY' 2>&1
+import sys
+import torch
+
+min_gb = float(sys.argv[1])
+if not torch.cuda.is_available():
+    print("[stage2-fix] cuda_available=0")
+    raise SystemExit(2)
+
+props = torch.cuda.get_device_properties(0)
+mem_gb = props.total_memory / (1024 ** 3)
+print(f"[stage2-fix] gpu_name={props.name} gpu_mem_gb={mem_gb:.2f} min_required_gb={min_gb:.2f}")
+if mem_gb + 1e-6 < min_gb:
+    raise SystemExit(3)
+PY
+)"
+gpu_guard_status=$?
+set -e
+echo "${GPU_GUARD_OUT}"
+if [[ "${gpu_guard_status}" == "2" ]]; then
+  echo "Error: CUDA unavailable for stage2-fix run." >&2
+  exit 1
+fi
+if [[ "${gpu_guard_status}" == "3" ]]; then
+  echo "Error: insufficient GPU memory for this config." >&2
+  echo "Error: rerun on high-memory GPU (e.g., --gres=gpu:a100:1)." >&2
+  exit 1
+fi
+
 DISTILL_SCORE_FLAG=()
 if [[ "${DISTILL_TEACHER_SCORE_WEIGHT}" == "1" ]]; then
   DISTILL_SCORE_FLAG+=(--distill_teacher_score_weight)
 fi
 
-"${PYTHON_RUNNER[@]}" src/main_train.py \
-  --data_root "data/dataset/semantickitti/dataset/sequences" \
-  --backbone "$BACKBONE" \
-  --lr "$LR" \
-  --epochs "$EPOCHS" \
-  --batch_size "$BATCH_SIZE" \
-  --num_workers "$NUM_WORKERS" \
-  --max_train_frames "$MAX_TRAIN_FRAMES" \
-  --teacher_backend "$TEACHER_BACKEND" \
-  --teacher_proxy_ckpt "$TEACHER_PROXY_CKPT" \
-  --run_id "$RUN_ID" \
-  --save_dir "$SAVE_DIR" \
-  --quantizer_mode "$QUANTIZER_MODE" \
-  --quant_bits "$QUANT_BITS" \
-  --roi_levels "$ROI_LEVELS" \
-  --bg_levels "$BG_LEVELS" \
-  --roi_target_mode "$ROI_TARGET_MODE" \
-  --loss_recipe "$LOSS_RECIPE" \
-  --rate_loss_mode "$RATE_LOSS_MODE" \
-  --importance_loss_mode "$IMPORTANCE_LOSS_MODE" \
-  --importance_pos_weight_mode "$IMPORTANCE_POS_WEIGHT_MODE" \
-  --importance_pos_weight "$IMPORTANCE_POS_WEIGHT" \
-  --importance_pos_weight_max "$IMPORTANCE_POS_WEIGHT_MAX" \
-  --lambda_recon "$L_RECON" \
-  --lambda_rate "$L_RATE" \
-  --lambda_distill "$L_DISTILL" \
-  --lambda_importance "$L_IMPORTANCE" \
-  --lambda_imp_separation "$L_IMP_SEP" \
-  --imp_separation_margin "$IMP_MARGIN" \
-  --distill_logit_loss "$DISTILL_LOGIT_LOSS" \
-  --distill_temperature "$DISTILL_TEMP" \
-  --distill_feature_weight "$DISTILL_FEATURE_WEIGHT" \
-  --distill_logit_weight "$DISTILL_LOGIT_WEIGHT" \
-  --distill_feature_source "$DISTILL_FEATURE_SOURCE" \
-  --distill_align_mode "$DISTILL_ALIGN_MODE" \
-  --distill_align_hw "$DISTILL_ALIGN_HW" \
-  --distill_teacher_score_min "$DISTILL_TEACHER_SCORE_MIN" \
-  "${DISTILL_SCORE_FLAG[@]}" \
-  --importance_head_type "$IMPORTANCE_HEAD_TYPE" \
-  --importance_hidden_channels "$IMPORTANCE_HIDDEN_CHANNELS"
+run_train_once() {
+  "${PYTHON_RUNNER[@]}" src/main_train.py \
+    --data_root "data/dataset/semantickitti/dataset/sequences" \
+    --backbone "$BACKBONE" \
+    --lr "$LR" \
+    --epochs "$EPOCHS" \
+    --batch_size "$BATCH_SIZE" \
+    --num_workers "$NUM_WORKERS" \
+    --max_train_frames "$MAX_TRAIN_FRAMES" \
+    --teacher_backend "$TEACHER_BACKEND" \
+    --teacher_proxy_ckpt "$TEACHER_PROXY_CKPT" \
+    --run_id "$RUN_ID" \
+    --save_dir "$SAVE_DIR" \
+    --quantizer_mode "$QUANTIZER_MODE" \
+    --quant_bits "$QUANT_BITS" \
+    --roi_levels "$ROI_LEVELS" \
+    --bg_levels "$BG_LEVELS" \
+    --roi_target_mode "$ROI_TARGET_MODE" \
+    --loss_recipe "$LOSS_RECIPE" \
+    --rate_loss_mode "$RATE_LOSS_MODE" \
+    --importance_loss_mode "$IMPORTANCE_LOSS_MODE" \
+    --importance_pos_weight_mode "$IMPORTANCE_POS_WEIGHT_MODE" \
+    --importance_pos_weight "$IMPORTANCE_POS_WEIGHT" \
+    --importance_pos_weight_max "$IMPORTANCE_POS_WEIGHT_MAX" \
+    --lambda_recon "$L_RECON" \
+    --lambda_rate "$L_RATE" \
+    --lambda_distill "$L_DISTILL" \
+    --lambda_importance "$L_IMPORTANCE" \
+    --lambda_imp_separation "$L_IMP_SEP" \
+    --imp_separation_margin "$IMP_MARGIN" \
+    --distill_logit_loss "$DISTILL_LOGIT_LOSS" \
+    --distill_temperature "$DISTILL_TEMP" \
+    --distill_feature_weight "$DISTILL_FEATURE_WEIGHT" \
+    --distill_logit_weight "$DISTILL_LOGIT_WEIGHT" \
+    --distill_feature_source "$DISTILL_FEATURE_SOURCE" \
+    --distill_align_mode "$DISTILL_ALIGN_MODE" \
+    --distill_align_hw "$DISTILL_ALIGN_HW" \
+    --distill_teacher_score_min "$DISTILL_TEACHER_SCORE_MIN" \
+    "${DISTILL_SCORE_FLAG[@]}" \
+    --importance_head_type "$IMPORTANCE_HEAD_TYPE" \
+    --importance_hidden_channels "$IMPORTANCE_HIDDEN_CHANNELS"
+}
+
+attempt=1
+while true; do
+  set +e
+  run_train_once
+  train_status=$?
+  set -e
+  if [[ "${train_status}" == "0" ]]; then
+    break
+  fi
+  if [[ "${attempt}" -lt "${TRAIN_MAX_RETRIES}" ]] && \
+     grep -qiE "CUDA-capable device\\(s\\) is/are busy or unavailable|CUDA error: out of memory" "logs/${LOG_PREFIX}.err"; then
+    echo "[stage2-fix][warn] transient CUDA failure (attempt ${attempt}/${TRAIN_MAX_RETRIES}); retrying in ${TRAIN_RETRY_SLEEP_SEC}s ..."
+    sleep "${TRAIN_RETRY_SLEEP_SEC}"
+    attempt=$((attempt + 1))
+    continue
+  fi
+  echo "Error: stage2-fix training failed (status=${train_status}) after ${attempt} attempt(s)." >&2
+  exit "${train_status}"
+done
 
 echo "Done Stage2 distill-fix twoexp sweep task ${IDX}"

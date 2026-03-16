@@ -75,6 +75,10 @@ if [[ ! -d "${OPENPCDET_ROOT}" ]]; then
   echo "Error: OPENPCDET_ROOT not found: ${OPENPCDET_ROOT}" >&2
   exit 1
 fi
+if [[ "${OPENPCDET_ROOT}" != /* ]]; then
+  OPENPCDET_ROOT="${ROOT_DIR}/${OPENPCDET_ROOT}"
+fi
+OPENPCDET_ROOT="$(cd "${OPENPCDET_ROOT}" && pwd -P)"
 
 if [[ "${OPENPCDET_PRETRAIN_CKPT}" != /* ]]; then
   OPENPCDET_PRETRAIN_CKPT="${ROOT_DIR}/${OPENPCDET_PRETRAIN_CKPT}"
@@ -242,11 +246,13 @@ if [[ -z "${CKPT_DIR}" || ! -d "${CKPT_DIR}" ]]; then
   echo "Error: could not locate ckpt dir for extra_tag=${EXTRA_TAG}" >&2
   exit 1
 fi
+CKPT_DIR="$(cd "${CKPT_DIR}" && pwd -P)"
 LATEST_CKPT="$(ls -1t "${CKPT_DIR}"/*.pth 2>/dev/null | head -n1)"
 if [[ -z "${LATEST_CKPT}" ]]; then
   echo "Error: no checkpoint produced under ${CKPT_DIR}" >&2
   exit 1
 fi
+LATEST_CKPT="$(cd "$(dirname "${LATEST_CKPT}")" && pwd -P)/$(basename "${LATEST_CKPT}")"
 
 TEST_LOG=""
 CAR_MOD="nan"

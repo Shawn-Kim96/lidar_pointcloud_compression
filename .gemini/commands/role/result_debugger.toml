@@ -1,9 +1,0 @@
-description = "Switch to result interpretation and debugging mode."
-prompt = """
-@{.gemini/prompts/role_result_interpretation_debugger.md}
-@{.gemini/prompts/context_lidar_compression_research.md}
-
-Apply this role for the next answer.
-User focus: {{args}}
-"""
-

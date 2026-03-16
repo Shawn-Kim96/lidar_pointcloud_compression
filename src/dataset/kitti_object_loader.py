@@ -63,11 +63,15 @@ class KittiObjectRangeDataset(Dataset):
         return_azimuth: bool = False,
         return_roi_mask: bool = True,
         roi_classes: Optional[Sequence[str]] = None,
+        return_raw_points: bool = False,
+        max_raw_points: int = 150000,
     ):
         self.root_dir = Path(root_dir)
         self.split = split
         self.return_azimuth = return_azimuth
         self.return_roi_mask = return_roi_mask
+        self.return_raw_points = bool(return_raw_points)
+        self.max_raw_points = int(max_raw_points)
         self.roi_classes = set(roi_classes) if roi_classes else set(DEFAULT_ROI_CLASSES)
 
         self.training_dir = self.root_dir / "training"
@@ -266,4 +270,14 @@ class KittiObjectRangeDataset(Dataset):
             outputs.append(torch.from_numpy(proj_roi_mask).unsqueeze(0))
         if self.return_azimuth:
             outputs.append(torch.from_numpy(proj_azimuth))
+        if self.return_raw_points:
+            raw_points = scan.astype(np.float32)
+            if raw_points.shape[0] > self.max_raw_points:
+                depth = np.linalg.norm(raw_points[:, :3], axis=1)
+                keep = np.argsort(depth)[: self.max_raw_points]
+                raw_points = raw_points[keep]
+            padded = np.zeros((self.max_raw_points, 4), dtype=np.float32)
+            padded[: raw_points.shape[0]] = raw_points[:, :4]
+            outputs.append(torch.from_numpy(padded))
+            outputs.append(torch.tensor([raw_points.shape[0]], dtype=torch.long))
         return tuple(outputs)

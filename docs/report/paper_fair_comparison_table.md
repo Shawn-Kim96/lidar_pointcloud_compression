@@ -120,20 +120,14 @@ Interpretation:
 
 <!-- BEGIN_TABLE_B -->
 
-## Table B. KITTI Detector Endpoint (Official 3D AP, Original vs Reconstructed Pair)
+## Table B. KITTI Detector Endpoint (Official 3D AP, Reference vs Reconstructed Pair)
 
-- `mode=original`: detector AP on original KITTI point clouds.
+- `mode=identity`: detector AP on the chosen reference baseline.
 - `mode=reconstructed`: detector AP on compression-reconstructed point clouds.
-- Rows are paired by the same `run_dir` to make `original vs reconstructed` comparison explicit.
+- Rows are paired by the same `run_dir` to make `reference vs reconstructed` comparison explicit.
 
-| Model family | Frames | Original Car 3D AP (mod) | Reconstructed Car 3D AP (mod) | Original mAP3D(mod) | Reconstructed mAP3D(mod) | map_drop_vs_original | Reconstructed `bpp_entropy_mean` | fairness_tag |
+| Model family | Frames | Identity Car 3D AP (mod) | Reconstructed Car 3D AP (mod) | Identity mAP3D(mod) | Reconstructed mAP3D(mod) | map_drop_vs_reference | Reconstructed `bpp_entropy_mean` | fairness_tag |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| Uniform Baseline (ResNet) | 128 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.7753 | unmatched |
-| Adaptive ROI Student (ResNet) | 128 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.6480 | unmatched |
-| Adaptive Distilled Student (ResNet) | 128 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.6235 | unmatched |
-
-Interpretation note:
-- Current run still has zero detector AP on both original and reconstructed point clouds.
-- Therefore, Table-B is currently a pipeline/protocol checkpoint, not detector-quality evidence.
+| No-Quant Autoencoder (ResNet) | 3769 | 69.88 | 4.33 | 52.74 | 2.19 | 50.55 | 0.0000 | unmatched |
 
 <!-- END_TABLE_B -->

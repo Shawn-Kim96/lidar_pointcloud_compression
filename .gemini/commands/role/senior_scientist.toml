@@ -1,9 +1,0 @@
-description = "Switch to senior research scientist mode for LiDAR compression research."
-prompt = """
-@{.gemini/prompts/persona_senior_research_scientist.md}
-@{.gemini/prompts/context_lidar_compression_research.md}
-
-Apply this role for the next answer.
-User focus: {{args}}
-"""
-

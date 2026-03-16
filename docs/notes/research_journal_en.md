@@ -873,3 +873,701 @@ Purpose: keep a date-ordered record of what was tested, why it was tested, what 
 - `logs/slurm_22383.out`
 - `notebooks/stage0_stage1_kitti_pointpillar_visualization.executed.ipynb`
 - `src/utils/recon_pointcloud_export.py`
+
+
+## 2026-03-02: Redesigned Experiment Status
+
+### Summary
+- The earlier Track-2 endpoint results show a clear mismatch: PointPillars remains valid on raw KITTI point clouds, but the detector collapses on reconstructed point clouds.
+- The dominant confounder is currently `projection loss + detector domain shift`, not a proven failure of the encoder/decoder alone.
+- The originally assumed "Track 2" run did not actually execute a native range-view detector. It only re-ran the PointPillars-based endpoint pipeline.
+
+### Problem Definition
+Two separate questions need to be isolated instead of being mixed together:
+
+1. `SemanticKITTI ROI sanity check`
+   - Why are the observed ROI regions so small?
+   - Is the dataset parsing correct?
+   - Are the ROI labels and GT association being built correctly?
+
+2. `KITTI detector endpoint failure`
+   - PointPillars works on raw 3D point clouds.
+   - Does it fail only after the pipeline `point cloud -> range image -> reconstructed point cloud`?
+   - If so, is the main issue projection loss, detector domain shift, or additional codec distortion?
+
+### Experimental Split
+The redesigned work is now separated into two tracks.
+
+1. `Track 1: Domain-adapted PointPillars`
+   - Test whether PointPillars can still detect objects after a pure `point cloud -> range image -> point cloud` identity round-trip.
+   - If the identity round-trip is still usable, test `point cloud -> range image -> encoder -> decoder -> range image -> point cloud`.
+   - Then test the quantized path `point cloud -> range image -> encoder -> quantize -> decoder -> range image -> point cloud`.
+   - Fine-tune the detector on the identity-domain data before judging the compression models.
+
+2. `Track 2: Native range-view detection`
+   - Replace the point-cloud detector with a detector that reads the range image directly.
+   - The immediate goal is not a full production detector, but a controlled pilot that can answer whether native range-view inference is more stable under reconstruction artifacts.
+
+### Results So Far
+`1-1. Identity baseline without learned compression`
+
+- Even without learned compression, the identity path `raw point cloud -> range image -> point cloud` loses many points.
+- In the earlier check, the point count dropped from roughly `120k` to `50k` points.
+- The number of predicted detection boxes also dropped from `44` to `27`.
+- This means the `64x1024` projection itself introduces a large representation change before any learned codec is involved.
+- Therefore, projection loss must be treated as a primary confounder.
+
+`1-2. Learned encoder/decoder and quantized reconstruction`
+
+- With the current detector protocol, the reconstructed endpoint produced `mAP = 0`.
+- The strongest current explanation is `detector domain shift`, but this is still a hypothesis under active test, not a final conclusion.
+- PointPillars was trained on dense raw point clouds.
+- The reconstructed clouds have a grid-like sampling pattern and a different density distribution.
+- From the detector's perspective, this is out-of-domain input, even when the scene content is still partially preserved.
+
+`Is the bitrate too aggressive?`
+
+- Current runs are around `1.06 bpp`.
+- This is not obviously outside the operating range commonly reported in LiDAR compression papers, but direct rate comparisons are only fair when the same rate definition, sensor setup, and projection protocol are matched.
+- The current backbone is lighter than many recent published models, but the available evidence does not support the claim that the encoder/decoder is failing to learn reconstruction at all.
+- At this stage, the data support a stronger claim about `representation mismatch` than about `backbone insufficiency`.
+
+### Updated Interpretation
+- It is too strong to say "this is not a codec problem." The more defensible statement is that `identity projection loss already causes major damage`, so the codec must be evaluated only after that baseline is separated.
+- It is also too strong to say "the true reason is domain shift." The more defensible statement is that `domain shift is currently the leading hypothesis`, and Track 1 is designed to test that directly.
+- Track 2 was not previously executed. The jobs that looked like Track 2 were still PointPillars-based evaluation jobs.
+
+### New Experiment Plan
+`Track 1 (running now)`
+
+- Export a `KITTI_Identity` dataset using the projection-unprojection path only.
+- Fine-tune OpenPCDet PointPillars on `KITTI_Identity`, not on raw KITTI, and use that detector as the new reference baseline.
+- Two fine-tune jobs are running now:
+  - `23308`: `10` epochs
+  - `23310`: `20` epochs
+- Two dependent evaluation jobs are already queued:
+  - `23309` depends on `23308`
+  - `23311` depends on `23310`
+- In Slurm, `afterok` means the child job starts only if the parent job finishes successfully with exit code `0`.
+
+`Track 1 follow-up decision rule`
+
+- If the `KITTI_Identity` detector recovers to a meaningful non-zero AP, then detector domain shift is confirmed as a major bottleneck.
+- If the identity detector recovers but compressed reconstruction remains near zero, then codec distortion is still too destructive after the domain shift is controlled.
+- If the identity detector also fails, the next controlled test is to increase projection width from `64x1024` to `64x2048`.
+- The `64x2048` experiment is a proposed next step, not a completed run.
+
+`Track 2 (implemented today as a controlled pilot)`
+
+- Added a minimal native range-view ROI detector pilot on top of the existing compression backbone.
+- This pilot is intentionally simpler than a full LaserNet-style 3D box detector. The purpose is to test whether native range-view objectness survives reconstruction better than the point-cloud detector endpoint.
+- Two detector heads are implemented:
+  - `linear`: a minimal dense `1x1` objectness head on the latent range-image features
+  - `refine`: a stronger convolutional refinement head before full-resolution prediction
+- Training protocol:
+  - Train the head on raw KITTI range images with ROI supervision.
+  - Evaluate on raw validation range images.
+  - Evaluate again on compression-reconstructed range images from the same frozen backbone and compare the gap.
+- This gives a controlled `raw vs compressed` native range-view comparison before investing in a full box-regression detector.
+- The first pilot completed successfully:
+  - `linear` head: best `compressed_iou = 0.1433`, best `compressed_f1 = 0.2506`
+  - `refine` head: best `compressed_iou = 0.3775`, best `compressed_f1 = 0.5480`
+- Since `refine` is materially better than `linear`, the next longer sweep is focused on `refine` and a deeper `deep` head rather than on the weak linear baseline.
+
+`Track 2 external checkpoints`
+
+- Added a checkpoint download script for official PRBonn LiDAR-Bonnetal range-view backbones.
+- Two official pretrained packages are now the first external checkpoint candidates:
+  - `darknet53`
+  - `darknet53-1024`
+- These are useful as future imported range-view backbones, but they are not yet wired into the pilot training loop.
+- For the overnight run, the immediate controlled comparison is the two in-repo Track 2 pilot heads (`linear` and `refine`) on top of the existing compression model.
+- The longer Track 2 sweep is now queued with full train/val splits:
+  - `23331`: `refine`, `hidden=128`, `epochs=120`
+  - `23332`: `refine`, `hidden=192`, `epochs=160`
+  - `23333`: `deep`, `hidden=128`, `epochs=120`
+  - `23334`: `deep`, `hidden=192`, `epochs=180`
+- A broader overnight Track 2 grid is also queued for coverage rather than manual monitoring:
+  - `24` jobs total
+  - Heads: `refine`, `deep`
+  - Hidden channels: `96`, `128`, `192`
+  - Learning rates: `1e-4`, `2e-4`
+  - Epochs: `120`, `180`
+- Submission and result-tracking artifacts for this grid:
+  - Submission plan: `docs/report/260302_track2grid_submission_plan.md`
+  - Manifest (job -> config -> output path): `logs/260302_track2grid_manifest.csv`
+  - Rolling result table: `logs/260302_track2grid_results.md`
+  - Machine-readable result CSV: `logs/260302_track2grid_results.csv`
+- The result collector can be re-run at any time to refresh the table after jobs finish, so the overnight sweep remains auditable without manual log inspection.
+- Some of the broader grid jobs failed immediately on heterogeneous GPUs (`CUDA OOM` or `device unavailable`), so the failed subset was re-queued with `batch_size=1` as a safety retry:
+  - Retry plan: `docs/report/260302_track2grid_retrybs1_plan.md`
+  - Retry manifest: `logs/260302_track2grid_retrybs1_manifest.csv`
+  - Retry rolling result table: `logs/260302_track2grid_retrybs1_results.md`
+  - Retry result CSV: `logs/260302_track2grid_retrybs1_results.csv`
+
+### 2026-03-03 Morning Check
+
+`Track 1`
+
+- Both PointPillars fine-tune jobs (`10` and `20` epochs) completed their training loops and wrote checkpoints successfully.
+- However, the training jobs still exited with failure because the automatic post-train evaluation inside OpenPCDet could not reload the saved checkpoints under the current PyTorch version.
+- Root cause:
+  - PyTorch `2.6+` changed the default `torch.load(..., weights_only=True)` behavior.
+  - The OpenPCDet checkpoint loader was still relying on the older default.
+- Fix applied:
+  - Patched the local OpenPCDet checkpoint loader to call `torch.load(..., weights_only=False)` in a backward-compatible wrapper.
+- Recovery action:
+  - Re-submitted the Track 1 evaluation stage directly from the already-saved checkpoints, without re-running fine-tuning.
+  - New recovery jobs:
+    - `23400`: `e20` evaluation
+    - `23409`: `e10` evaluation (H100 excluded)
+- Additional hardware-specific issue:
+  - One first recovery evaluation attempt landed on an H100 node and failed in the OpenPCDet `iou3d_nms` CUDA extension with `no kernel image is available for execution on the device`.
+  - This indicates the locally built OpenPCDet CUDA ops are not compiled for `sm90`.
+  - Operationally, Track 1 evaluation should avoid H100 nodes unless the extension is rebuilt with H100 support.
+
+`Track 2`
+
+- The broad overnight grid did not fail for a single reason; two separate resource issues appeared:
+  - Immediate failures on some nodes: `CUDA OOM` or `device unavailable`
+  - Long runtime risk: the successful batch-2 full-split jobs only reached roughly `48-55` epochs after about `10` hours
+- Interpretation:
+  - At the observed throughput, `120`-epoch jobs are borderline under the old `24h` request.
+  - `180`-epoch jobs are unlikely to finish cleanly under the old `24h` request.
+- Important scheduler note:
+  - `gpuqm` and `gpuql` use the same GPU node pool on this cluster.
+  - Moving from `gpuqm` to `gpuql` is therefore not a hardware upgrade; it only gives a longer queue class / longer allowed walltime.
+- Fixes applied:
+  - Kept the original broad grid running, since it already consumed substantial compute.
+  - Re-queued the immediate-failure subset with `batch_size=1` as a safety retry.
+  - Added per-epoch artifact writing to the Track 2 trainer so future long jobs keep a rolling `metrics.csv`, `summary.json`, and best checkpoint during training instead of only at the end.
+- Next controlled sweep now queued:
+  - Launched an H100-only confirmatory sweep on `gpuql` with `48:00:00` walltime to remove the mixed-GPU confounder and the too-short walltime.
+  - Node target: `g16,g18,g19`
+  - Manifest: `logs/260303_track2h100_manifest.csv`
+  - Result table: `logs/260303_track2h100_results.md`
+  - Result CSV: `logs/260303_track2h100_results.csv`
+  - Submission plan: `docs/report/260303_track2h100_plan.md`
+
+### 2026-03-03 Midday Correction
+
+`Track 2 stop decision`
+
+- The in-repo Track 2 ROI pilot (`track2_refine`, `track2_deep`) was stopped intentionally.
+- Reason: the current Track 2 jobs were only training a lightweight ROI/objectness head on top of the frozen in-repo compression backbone.
+- This is useful only as a proxy sanity check, but it is not the intended publishable endpoint.
+- Specifically, it is not a well-known external range-view 3D detector with a public detector checkpoint.
+- All currently running `track2_*` jobs were cancelled so that no more GPU time is spent on this proxy setup.
+
+`Track 1 geometry correction`
+
+- The earlier Track 1 implementation did not actually run the requested `64x2048` geometry change.
+- The original submitted jobs still used the default `64x1024` projection.
+- This has now been corrected in code:
+  - `run_track1_pipeline.sh` now defaults to `64x2048`
+  - the identity export path now records geometry in the dataset path name
+  - a new `unprojection_mode` flag is threaded through the Track 1 export and evaluation path
+- New default for future Track 1 geometry experiments:
+  - projection: `64x2048`
+  - unprojection: `ray`
+
+`New unprojection ablation`
+
+- Added two explicit unprojection modes for Track 1:
+  - `decoded_xyz`: trust reconstructed `x,y,z` channels directly (old behavior)
+  - `ray`: reconstruct `x,y,z` from the reconstructed range channel and the fixed per-pixel ray geometry
+- The `ray` mode is the more defensible geometry-preserving option for the next Track 1 ablation because it enforces angular consistency instead of trusting noisy decoded Cartesian coordinates.
+
+`External baselines pulled locally`
+
+- `RENO` (CVPR 2025) was pulled into `third_party/external_codecs/RENO`.
+- The repository includes public pretrained weights, including `model/KITTIDetection/ckpt.pt`.
+- This is a credible stronger reconstruction baseline for Track 1, but it is not yet wired into the in-repo evaluation path.
+- Immediate blocker: the current environment does not have `torchsparse`, `open3d`, or `torchac`, which RENO requires.
+
+- Two external range-view detector repos were also pulled for Track 2 review:
+  - `third_party/external_range_det/RangeDet` (ICCV 2021, official code)
+  - `third_party/external_range_det/range-view-3d-detection` (CoRL 2024, open-source code)
+- Current status:
+  - `RangeDet` is a real external range-view detector and includes KITTI range-image tooling, but no public pretrained detector checkpoint is bundled in the official repo.
+  - `range-view-3d-detection` is a newer open-source detector codebase, but the public repo targets Argoverse 2 / Waymo, not KITTI.
+- Therefore, the next Track 2 step should be a deliberate external-detector integration, not another in-repo toy head sweep.
+
+### 2026-03-03 Late Night Track Reset
+
+`Track 1 execution`
+
+- Submitted two corrected high-resolution Track 1 chains, both using `64x2048` range images and `ray` unprojection.
+- Both jobs are long sequential chains that run on one GPU each:
+  1. Stage0 uniform training
+  2. Stage1 adaptive training
+  3. `KITTI_Identity` export for the same geometry
+  4. PointPillars fine-tuning on the identity-domain point cloud
+  5. Endpoint evaluation on the Stage0 and Stage1 reconstructed point clouds
+- Submission manifest:
+  - `logs/260303_225625_track1_hires_manifest.csv`
+- Running jobs:
+  - `23537`: `track1a_hires` (baseline codec, no multiscale latent fusion)
+  - `23538`: `track1b_hires` (enhanced codec with multiscale latent fusion + decoder refinement)
+
+`Track 1B architecture change`
+
+- The enhanced codec is no longer a last-stage-only latent bottleneck.
+- Added an optional multiscale latent fusion block before quantization.
+- The fusion reuses the existing Stage3 neck variants and is now wired directly into the compression model.
+- The current enhanced Track 1B run uses:
+  - feature fusion variant: `rangeformer`
+  - fusion hidden channels: `160`
+  - decoder post-refine residual blocks: `3`
+- This makes Track 1B a real multiscale encoder/decoder ablation rather than a shallow architectural duplicate.
+
+`Track 2 status`
+
+- No new Track 2 jobs were submitted.
+- Reason: `RangeDet` is still blocked at the runtime/environment layer.
+- The official repository is present locally, but the current environment does not have `mxnet`, and the codebase also depends on custom compiled operators.
+- Therefore, submitting a fake Track 2 job now would not be scientifically or operationally valid.
+- The correct next step for Track 2 is a dedicated environment/integration pass for `RangeDet`, not another placeholder launch.
+
+### 2026-03-03 RangeDet Integration Push
+
+`Dedicated RangeDet environment`
+
+- Built a separate `RangeDet` environment at:
+  - `/home/018219422/miniconda3/envs/rangedet39`
+- Installed a CUDA-compatible MXNet stack for this environment:
+  - `mxnet-cu112==1.9.1`
+  - `numpy==1.23.5`
+  - `cmake`, `ninja`, `pybind11`, `eigen`, `openblas-devel`
+  - Python dependencies required by the official code path
+  - NVIDIA runtime libraries inside the env (`cudnn`, `cublas`, `cuda_nvrtc`)
+- Important runtime note:
+  - `mxnet-cu112` does not import on the login node because `libcuda.so.1` is absent there.
+  - This is expected on the login node and is not evidence of failure on a real GPU node.
+
+`Official RangeDet bring-up status`
+
+- The official `RangeDet` repository remains at:
+  - `third_party/external_range_det/RangeDet`
+- Added compatibility patches so the original code can run in the current environment:
+  - `horovod.mxnet` import is now optional
+  - explicit `ctypes.CDLL('./operator_cxx/contrib/contrib_cxx.so')` loads are now optional in `tools/train.py` and `tools/test.py`
+  - modernized CMake / Python / Eigen handling for the C++ extension build
+- The main C++ extension now compiles successfully:
+  - `processing_cxx.cpython-39-x86_64-linux-gnu.so`
+
+`Custom operator diagnosis`
+
+- The legacy `contrib_cxx.so` custom CUDA operator still does not build cleanly on the current toolchain.
+- Repeated failures occur in `decode_3d_bbox.cu` with a large cascade of:
+  - `this declaration may not have extern "C" linkage`
+- This persisted after:
+  - supplying MXNet source headers
+  - fixing CUDA / BLAS / Eigen includes
+  - trying multiple host compiler setups
+  - removing the legacy `cuda_utils.h` include path from the operator source
+- Therefore, `contrib_cxx.so` is not the current forward path.
+
+`Practical workaround`
+
+- Replaced the `Decode3DBbox` dependency inside the model graph with a symbolic MXNet implementation in:
+  - `rangedet/symbol/head/builder.py`
+- This keeps the official detector path intact while avoiding the broken legacy custom decode operator.
+- Weighted NMS still uses the compiled `processing_cxx` path, which is now available.
+
+`KITTI dataset conversion for RangeDet`
+
+- Patched the official KITTI conversion script so it writes the fields the actual training loader expects.
+- The same converter now also accepts `--pointcloud-source-dir`, so future `stage0` / `stage1` reconstructed `.bin` trees can reuse the raw KITTI labels and calibration while swapping only the point clouds.
+- Converted KITTI into a local RangeDet-formatted dataset at:
+  - `data/dataset/rangedet_kitti_hq`
+- Confirmed training and validation split records exist:
+  - `data/dataset/rangedet_kitti_hq/training/part-0000.roidb`
+  - `data/dataset/rangedet_kitti_hq/validation/part-0000.roidb`
+- Current counts:
+  - `npz_trainval`: `7481`
+  - `npz_test`: `607` so far while the test-split conversion is still in progress
+
+`Track 2 submission status`
+
+- Submitted a real `RangeDet` smoke job and chained the first full raw-KITTI training behind it:
+  - `23542`: `rangedet_smoke`
+    - dependency: `afterany:23537`
+    - config: `config/rangedet/rangedet_kitti_car_24e.py`
+    - `1` epoch, `sampling_rate=64`
+    - runs training plus test
+  - `23543`: `rangedet_raw24`
+    - dependency: `afterok:23542`
+    - same config
+    - `24` epochs, `sampling_rate=1`
+    - runs training plus test
+- Both are queued on `gpuql`, so they will start only after the current Track 1 usage drops.
+- Job-chain manifest:
+  - `logs/260303_rangedet_kitti_chain.csv`
+
+`Interpretation`
+
+- Track 2 is no longer blocked by "MXNet is missing" as a passive blocker.
+- The environment, build fixes, dataset conversion, and first real submission chain are now in place.
+- The remaining open question is not setup in principle; it is whether the first GPU smoke run executes cleanly on the hardware once the dependency clears.
+
+### 2026-03-04 RangeDet Smoke Debug Iteration
+
+`23542 root cause and follow-up`
+
+- The original first smoke job `23542` did run on a real A100 node, but it failed immediately during `mxnet` import.
+- The failure chain was resolved step-by-step:
+  1. missing `libnccl.so.2`
+  2. missing `libcudart.so.11.0` and other CUDA runtime libraries (`cufft`, `cusolver`, `curand`, `nvtx`)
+  3. missing Python dependencies (`requests`, `numba`, `pytz`)
+  4. `PYTHONPATH` mismatch for `from utils import ...`
+  5. missing `RotatedIOU` in this MXNet build
+  6. pickle compatibility issue (`numpy._core` vs NumPy 1.23)
+  7. deprecated NumPy API (`np.asscalar`)
+- These were handled in code and environment rather than treated as stopping blockers.
+
+`RangeDet compatibility fixes now in place`
+
+- Runtime scripts now export all NVIDIA wheel-provided library paths from the dedicated `rangedet39` env.
+- RangeDet runners now use `python -u` for unbuffered logs.
+- `RotatedIOU` is no longer required for training on this build:
+  - when unavailable, the training graph falls back to a binary positive-mask target for the classification branch
+  - this preserves executability while keeping the detector structure intact
+- The symbolic `Decode3DBbox` replacement was further patched to avoid `mx.sym.np.arctan2` so it works with legacy MXNet symbols during inference.
+- `tools/train.py` and `tools/test.py` now alias `numpy._core` to support the existing pickled roidb files.
+- `tools/test.py` now uses `np.asarray(...).item()` instead of removed `np.asscalar`.
+- `tools/test.py` also marks the loader thread as daemon, so eval failures do not leave hanging jobs holding a node.
+
+`Current smoke status`
+
+- A full smoke run (`23585`) already proved that:
+  - training runs successfully on the GPU node
+  - the model trains for `1` epoch
+  - a checkpoint is saved
+- That run then failed during the eval phase on the deprecated `np.asscalar` API.
+- After patching that issue, the training half no longer needs to be re-proven.
+
+`Current active Track 2 chain`
+
+- `23587`: `rangedet_eval_smk`
+  - eval-only job
+  - reuses the saved checkpoint from `experiments/rangedet_kitti_smoke_1e_260304_0100/checkpoint-0001.params`
+  - purpose: validate the patched `test.py` path only
+- `23589`: `rangedet_raw24`
+  - queued with `afterok:23587`
+  - if the eval-only smoke passes, the first full `24`-epoch raw-KITTI RangeDet training run starts automatically
+
+`Interpretation`
+
+- Track 2 has crossed the key threshold from environment triage into actual detector execution:
+  - training is already confirmed to run
+  - the remaining active gating step is the evaluation path
+- If `23587` completes, then the first real raw-KITTI RangeDet baseline (`23589`) proceeds automatically.
+
+### 2026-03-05 Geometry Bottleneck Confirmation and New Branches
+
+## Last Experiments Result
+
+- `Track 1: high-resolution endpoint diagnosis`
+- We re-ran the endpoint at `64x2048` with `ray` unprojection and identity-domain PointPillars fine-tuning.
+- The detector adaptation itself succeeded on the exported `KITTI_Identity` domain:
+  - `pp_ft_track1nq_a_baseline_260304_230724`: `mAP3D(mod)=73.5935`
+  - `pp_ft_track1nq_b_enhanced_260304_230724`: `mAP3D(mod)=73.5501`
+- However, the reconstructed endpoint still collapsed.
+- `No-quant` result:
+  - baseline (`track1nq_a`): identity reference `mAP3D(mod)=51.5667`, reconstructed `0.0002507`
+  - enhanced (`track1nq_b`): identity reference `54.3868`, reconstructed `0.0000`
+- `Uniform / oracle / bg-level` diagnostic result at the reconstructed endpoint:
+  - uniform-like native quant: baseline `0.000`, enhanced `0.001`
+  - oracle ROI map: baseline `0.000`, enhanced `0.001`
+  - background-level sweep (`24/32/48/64`): still `0.000 ~ 0.001`
+- This means the endpoint failure persists even after:
+  - increasing projection width to `64x2048`
+  - changing unprojection to `ray`
+  - adapting the detector to the identity-domain point cloud
+  - removing quantization entirely
+  - giving the codec an oracle ROI allocation
+
+- `Track 2: official RangeDet execution`
+- The official raw KITTI RangeDet training had already completed successfully with the `24e` KITTI car config.
+- We then re-ran evaluation so that raw and reconstructed outputs are archived separately instead of overwriting the same `output_dict` file.
+- Completed and archived:
+  - `24095`: raw RangeDet eval -> `logs/rangedet_eval_outputs/260305_215136_raw_output_dict_24e.pkl`
+  - `24096`: no-quant reconstructed eval (baseline codec) -> `.../260305_215136_nqa_output_dict_24e.pkl`
+  - `24097`: no-quant reconstructed eval (enhanced codec) -> `.../260305_215136_nqb_output_dict_24e.pkl`
+- Completed afterward:
+  - `24098`: uniform reconstructed eval (baseline codec) -> `.../260305_215136_uqa_output_dict_24e.pkl`
+  - `24099`: uniform reconstructed eval (enhanced codec) -> `.../260305_215136_uqb_output_dict_24e.pkl`
+- We also added a reproducible archive evaluator:
+  - `src/scripts/eval_rangedet_archive_car_ap.py`
+  - summary CSV: `logs/260306_rangedet_archive_car_ap_summary.csv`
+- Under this current car-only lidar-space evaluator, the comparison is:
+  - raw: `AP3D@0.3=0.0464`, `APBEV@0.3=0.1744`, `meanBestIoU3D=0.1915`
+  - no-quant baseline: `AP3D@0.3=0.0001`, `APBEV@0.3=0.0085`, `meanBestIoU3D=0.0390`
+  - no-quant enhanced: `AP3D@0.3=0.0003`, `APBEV@0.3=0.0061`, `meanBestIoU3D=0.0329`
+  - uniform baseline: `AP3D@0.3=0.0001`, `APBEV@0.3=0.0032`, `meanBestIoU3D=0.0305`
+  - uniform enhanced: `AP3D@0.3=0.0000`, `APBEV@0.3=0.0035`, `meanBestIoU3D=0.0234`
+- At stricter thresholds (`0.5`, `0.7`), all reconstructed Track 2 runs are effectively zero, and even the current raw RangeDet baseline is already near-zero at `AP3D@0.5` and `AP3D@0.7`.
+
+- `Track 1: new no-quant geometry-aware training now running`
+- Two stronger no-quant codec runs are active:
+  - `24093`: `t1nq_geo_rf`
+  - `24094`: `t1nq_geo_fr`
+- Both use:
+  - wider/deeper encoder (`latent=128`, `base=96`, `blocks_per_stage=2`)
+  - `masked_channel_weighted` reconstruction emphasizing `xyz`
+  - decoder refinement
+  - multiscale latent fusion
+- Early training behavior is healthy:
+  - `24093`: loss has dropped from the high teens to about `8.66` by epoch `28`
+  - `24094`: loss has dropped from `51.32` to about `9.52` by epoch `8`
+
+- `Track 1: new implicit / position-aware branch now running`
+- We added a new `RENO/implicit-inspired` branch to the in-repo codec.
+- This is not a full external-paper reproduction; it is a targeted geometry-aware implementation for our current bottleneck.
+- New components:
+  - `position_branch`: separate `xyz` side encoder
+  - `coord_conditioned` decoder: sensor ray and pixel coordinate conditioning
+  - `ray_consistency` loss: predicted `range` and predicted `xyz` must agree geometrically
+- Active runs:
+  - `24103`: `t1nq_impl_a`
+  - `24104`: `t1nq_impl_b`
+- Early training behavior is also healthy:
+  - `24103`: loss `274.23 -> 31.08 -> 13.09 -> 9.87 -> 8.67`
+  - `24104`: loss `291.22 -> 40.47 -> 18.46` in the first epochs
+
+## Result Discussion & Problem Setting
+
+- The main Track 1 result is now much clearer than before:
+  - the reconstructed point-cloud endpoint does not fail mainly because of `stage1 adaptive quantization`
+  - it already fails in the simpler `no-quant encoder/decoder` setting
+- Therefore, the current leading explanation is:
+  - the bottleneck is `geometry preservation in the RI -> latent -> RI path`
+  - not merely `uniform vs adaptive bit allocation`
+- More concretely:
+  - a simple 2D RI autoencoder can reduce reconstruction loss while still destroying the geometric cues that a point-cloud detector uses
+  - `PointPillars` needs the reconstructed cloud to preserve density, angular consistency, and object-support geometry well enough for voxelization and pillar statistics
+  - our current baseline/enhanced codec families are still mostly `2D RI reconstruction` systems, even when they use multiscale 2D fusion
+- The `no-quant` result is especially important:
+  - if `no-quant` is already near zero AP, then stage1 quantization is not the first problem to solve
+  - this justifies a temporary shift away from more `adaptive-vs-uniform` sweeps and toward stronger geometry-aware codec design
+
+- There is still one protocol caveat:
+  - the exported `KITTI_Identity` fine-tune summary reports `~73.55-73.59` mAP3D(mod)
+  - the wrapper-side identity reference inside the no-quant endpoint CSV is lower (`~51.57-54.39`)
+  - this means there is still an unresolved evaluation-protocol mismatch between the two identity baselines
+  - the qualitative conclusion is still stable (`reconstructed endpoint collapses`), but this mismatch should be cleaned up before a final paper table is written
+
+- For Track 2, the research framing is now more concrete:
+  - if native range-view detection remains stable on reconstructed RI while point-cloud detection collapses on reconstructed PC,
+  - then the right claim is not `generic point cloud preservation`
+  - the right claim is `task-aware / range-view-aware LiDAR compression`
+- This is still scientifically meaningful because the compressed signal still originates from the LiDAR scan.
+- But the scope must be stated honestly:
+  - Track 2 is a `native RI downstream` story
+  - Track 1 is the stronger but harder `reconstructed point-cloud downstream` story
+- However, the newly extracted Track 2 numbers add an important caution:
+  - under our current KITTI conversion + raw `24e` RangeDet setup, the `raw` detector itself is not yet a strong baseline
+  - therefore the current Track 2 table does show a large raw -> reconstructed degradation,
+  - but it does **not** yet support a strong end claim about a competitive native RI detector pipeline
+- In other words:
+  - the engineering integration is solved
+  - the current scientific baseline is still weak
+  - Track 2 now needs either a stronger detector protocol or a corrected training/evaluation setup before it can become a publishable main result
+
+## Next Steps
+
+- `Track 1 immediate next step`
+- Let the four active no-quant runs finish first:
+  - `24093`, `24094` for stronger multiscale geometry-aware autoencoders
+  - `24103`, `24104` for the new implicit / position-aware branch
+- Then run the full endpoint again with the identity-domain PointPillars detector and compare:
+  - old no-quant baseline
+  - stronger no-quant multiscale branch
+  - new implicit / position-aware branch
+- Decision rule:
+  - if the reconstructed endpoint is still near zero, then the next codec change should be more structural than just “wider 2D”
+  - likely directions are a voxel/point hybrid side representation or a more lossless projection representation
+
+- `Track 2 immediate next step`
+- The raw / no-quant / uniform comparison table is now extracted.
+- The next Track 2 task is no longer metric extraction; it is baseline repair:
+  - verify whether the current KITTI conversion, calibration convention, or RangeDet training setup is suppressing raw performance
+  - if the raw detector baseline cannot be made strong, Track 2 should not move on to more codec ablations yet
+- Only after the raw RangeDet baseline is credible should we decide whether a detector-aware codec loss is needed for Track 2.
+
+- `Documentation / paper framing next`
+- Keep documenting Track 1 and Track 2 separately.
+- The current storyline is now:
+  - identity projection already damages the point-cloud endpoint
+  - quantization is not the main reason for the current Track 1 collapse
+  - stronger geometry-aware no-quant codec design is now the correct next experiment
+  - Track 2 remains viable as a range-view-aware LiDAR compression direction, pending official metric extraction
+
+## 2026-03-15: Pillar side-stream results and RangeDet raw decode audit
+
+### Last Experiments Result
+
+- `Track 1: pillar / BEV side-stream completed`
+  - `25093` (`pillar_a`) finished with:
+    - identity-domain reference `mAP3D(mod) = 54.7708`
+    - reconstructed endpoint `mAP3D(mod) = 0.0185`
+  - `25094` (`pillar_b`) finished with:
+    - identity-domain reference `mAP3D(mod) = 52.7378`
+    - reconstructed endpoint `mAP3D(mod) = 2.1922`
+  - Interpretation:
+    - explicit 3D side information **does help**
+    - `pillar_b` is the first Track 1 run that materially lifts the reconstructed endpoint above the previous near-zero regime
+    - but the endpoint is still far below the identity reference, so the codec is still not preserving enough geometry
+
+- `Track 2: official raw/basic audit found a real decode bug`
+  - The symbolic RangeDet fallback decode path in `rangedet/symbol/head/builder.py` was inconsistent with the original C++ `Decode3DBbox` operator.
+  - This matters because the fallback path is used during training when `contrib_cxx.so` is not available, and our previous logs showed that fallback path was active.
+  - We patched the symbolic decode to match the original `is_bin=False` semantics:
+    - square-root coded `delta_x`, `delta_y`
+    - `[log_width, log_length, cos_yaw, sin_yaw, z0, log_height]` ordering
+    - direct `z0 -> z1` reconstruction
+  - We also patched `tools/train.py` and `tools/test.py` to search for `contrib_cxx.so` via an absolute repo path when that library is available later.
+
+- `Track 2: old raw/basic checkpoint is no longer trusted`
+  - The old raw/basic RangeDet checkpoint was trained while the broken symbolic decode path was active.
+  - Therefore the previous raw/basic numbers are not a valid final baseline.
+  - Re-evaluating that old checkpoint is not enough; raw/basic must be retrained from scratch with the patched decode.
+
+### Result Discussion & Problem Setting
+
+- `Track 1`
+  - The current evidence is now stronger than before:
+    - the failure is not simply `uniform vs adaptive quantization`
+    - the failure is also not fixed by adding a shallow 3D hint
+  - However, the pillar/BEV side-stream result shows that the hypothesis about missing 3D structure was directionally correct.
+  - The remaining bottleneck is likely the decoder:
+    - current reconstructions still show strong stripe / banding artifacts
+    - the previous decoder family relied mainly on transpose-conv upsampling
+    - there was no real encoder-to-decoder skip path to preserve fine spatial geometry
+
+- `Track 2`
+  - The current Track 2 weakness is now split into two different issues:
+    - raw/basic was compromised by a real RangeDet decode bug during training
+    - reconstructed range images are still visibly distorted by the codec
+  - So the correct order is:
+    - first repair the raw/basic baseline with patched retraining
+    - then compare Stage 0 / Stage 1 against that repaired detector
+
+### Next Steps
+
+- `Track 1 next run: stronger decoder on top of the pillar side-stream`
+  - We implemented a new skip-connected decoder family:
+    - bilinear upsampling instead of transpose-conv
+    - explicit encoder skip features
+    - optional coordinate-conditioned implicit prediction head
+  - Two new main Track 1 runs are now submitted:
+    - `25892`: `t1nq_pillar_skip_a`
+    - `25894`: `t1nq_pillar_skip_b`
+  - Goal:
+    - keep the useful pillar/BEV side stream from `pillar_b`
+    - directly attack the current stripe/banding failure mode in Stage 0
+
+- `Track 2 next run: full raw/basic retraining with patched decode`
+  - A new corrected raw/stage chain is submitted:
+    - `25893`: patched raw/basic RangeDet retraining
+    - `25895`-`25899`: dependent raw / Stage 0 / Stage 1 eval jobs
+  - This new chain is the first one that combines:
+    - correct `sampling_rate=1`
+    - `2048` width fixes
+    - patched symbolic decode path
+  - Decision rule:
+    - if raw/basic still collapses after this retrain, then a deeper KITTI conversion / box-convention audit is still required
+    - if raw/basic recovers, then the remaining Track 2 gap can be attributed more cleanly to the codec
+
+## 2026-03-16: Track 2 raw/basic repaired, codec bottleneck isolated
+
+### Last Experiments Result
+
+- `Track 2 corrected raw/basic chain completed`
+  - Completed jobs:
+    - `25893`: patched raw/basic retraining
+    - `25895`: raw/basic eval
+    - `25896`: Stage 0 baseline eval
+    - `25897`: Stage 0 enhanced eval
+    - `25898`: Stage 1 baseline eval
+    - `25899`: Stage 1 enhanced eval
+  - New archive summary:
+    - `logs/260316_rangedet_archive_car_ap_summary_rddecodefixfull.csv`
+
+- `Custom lidar-space AP summary`
+  - `raw/basic`
+    - `AP3D@0.3 = 0.5700`
+    - `AP3D@0.5 = 0.4979`
+    - `AP3D@0.7 = 0.2435`
+    - `APBEV@0.3 = 0.5777`
+    - `meanBestIoU3D = 0.6098`
+  - `Stage 0 baseline`
+    - `AP3D@0.3 = 0.0215`
+    - `AP3D@0.5 = 0.0028`
+    - `AP3D@0.7 = 0.0000`
+    - `APBEV@0.3 = 0.0272`
+    - `meanBestIoU3D = 0.1202`
+  - `Stage 0 enhanced`
+    - `AP3D@0.3 = 0.0099`
+    - `AP3D@0.5 = 0.0010`
+    - `AP3D@0.7 = 0.0000`
+    - `APBEV@0.3 = 0.0134`
+    - `meanBestIoU3D = 0.1040`
+  - `Stage 1 baseline`
+    - `AP3D@0.3 = 0.0083`
+    - `AP3D@0.5 = 0.0007`
+    - `AP3D@0.7 = 0.0000`
+    - `APBEV@0.3 = 0.0107`
+    - `meanBestIoU3D = 0.0874`
+  - `Stage 1 enhanced`
+    - `AP3D@0.3 = 0.0050`
+    - `AP3D@0.5 = 0.0003`
+    - `AP3D@0.7 = 0.0000`
+    - `APBEV@0.3 = 0.0069`
+    - `meanBestIoU3D = 0.0704`
+
+### Result Discussion & Problem Setting
+
+- `Track 2 raw/basic is now credible`
+  - The patched raw/basic detector is no longer near zero.
+  - This confirms that the previous raw/basic collapse was dominated by the RangeDet decode-path bug.
+  - Therefore, Track 2 can now be interpreted as a real `raw/basic vs reconstructed RI` comparison.
+
+- `The main Track 2 bottleneck is now the codec`
+  - `Stage 0` already collapses relative to `raw/basic`.
+  - `Stage 1` is even worse.
+  - So the dominant Track 2 failure is not the detector baseline anymore.
+  - The dominant failure is that the current encoder/decoder produces reconstructed range images that are too distorted for 3D detection.
+
+- `Current enhanced codec is not helping Track 2`
+  - On the repaired Track 2 detector baseline, `enhanced` is worse than `baseline`.
+  - That means the previous “enhanced” changes do not improve detector-facing geometry preservation, even if they help reconstruction loss or internal feature richness.
+
+- `Track 1 implication`
+  - The new skip-decoder Track 1 runs are justified by this result.
+  - The main hypothesis is now:
+    - pillar/BEV side information was the correct direction
+    - but the old decoder still destroyed fine geometry through transpose-conv upsampling and lack of explicit skip connections
+
+### Next Steps
+
+- `Track 1 running now`
+  - `25892`: `t1nq_pillar_skip_a`
+  - `25894`: `t1nq_pillar_skip_b`
+  - These runs keep the pillar/BEV side stream and replace the decoder with a skip-connected bilinear upsampling variant.
+
+- `Track 2 follow-up now submitted`
+  - New dependency chain submitted to test whether the new Track 1 skip-decoder also improves the Track 2 Stage 0 endpoint:
+    - evaluate `25892` reconstructed RI with RangeDet after completion
+    - evaluate `25894` reconstructed RI with RangeDet after completion
+    - automatically compare:
+      - repaired `raw/basic`
+      - old Stage 0 baseline / enhanced
+      - new skip-decoder Stage 0 variants
+  - Submission manifest:
+    - `logs/260316_t2skip_stage0_track2_rangedet_skip_stage0_manifest.csv`
+
+- `Decision rule`
+  - If the skip-decoder variants improve Track 2 Stage 0 materially, then the main Stage 0 bottleneck is decoder structure / artifact pattern.
+  - If they still stay near zero, then the next change should go beyond decoder structure and add stronger geometry-aware supervision or representation changes.

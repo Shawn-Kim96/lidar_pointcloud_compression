@@ -1,79 +1,68 @@
-\section{Naming and Stage Mapping}\label{apx:naming-map}
-The thesis body uses model-family names to improve readability, while experiment scripts and logs use internal stage labels. Table~\ref{tab:naming-map} provides the reproducibility mapping.
+\section{Manuscript Naming Map}\label{apx:naming-map}
+The manuscript uses family names for readability. Internal engineering stage names are mapped in Table~\ref{tab:naming-map} only for reproducibility.
 
 \begin{table}[!htb]
-\caption{Model-family naming used in the manuscript and internal stage mapping}
+\caption{Family naming used in the manuscript}
 \label{tab:naming-map}
 \centering
 \small
 \begin{tabular}{l l l}
 \toprule
-\textbf{Manuscript family} & \textbf{Internal stage label} & \textbf{Core setting} \\
+\textbf{Family name} & \textbf{Internal stage alias} & \textbf{Core idea} \\
 \midrule
-Uniform Baseline (UB) & Stage0 & uniform quantization, reconstruction-only objective \\
-Adaptive ROI Student (ARS) & Stage1 & adaptive quantization + ROI supervision, no teacher \\
-Adaptive Distilled Student (ADS) & Stage2 & ARS objective + teacher distillation \\
-Multi-Scale Distilled Student (MS-ADS) & Stage3 & ADS objective + multi-scale ROI head variants \\
+Uniform Baseline (UB) & Stage0 & uniform quantization with reconstruction-only objective \\
+Adaptive ROI Student (ARS) & Stage1 & adaptive quantization with ROI supervision \\
+Adaptive Distilled Student (ADS) & Stage2 & ARS + teacher-guided distillation \\
+Multi-Scale Distilled Student (MS-ADS) & Stage3 & ADS + stronger multi-scale ROI branch \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\section{Objective-to-Implementation Traceability}\label{apx:traceability}
-To keep the main text theory-focused, equation-to-code traceability is summarized here.
+\section{Concept-to-Implementation Traceability}\label{apx:traceability}
+The main body presents theory and evidence. Table~\ref{tab:traceability} provides a conceptual traceability map without repository-specific details.
 
 \begin{table}[!htb]
-\caption{Traceability map: equations/terms to implementation locations}
+\caption{Traceability from objective terms to implementation components}
 \label{tab:traceability}
 \centering
 \small
-\begin{tabular}{p{0.17\textwidth} p{0.27\textwidth} p{0.48\textwidth}}
+\begin{tabular}{p{0.23\textwidth} p{0.23\textwidth} p{0.43\textwidth}}
 \toprule
-\textbf{Main-text term} & \textbf{Equation} & \textbf{Primary implementation} \\
+\textbf{Objective term} & \textbf{Equation} & \textbf{Implemented component} \\
 \midrule
-Total objective & Eq.~\ref{eq:total-objective} & \texttt{src/train/trainer.py}: weighted sum in \texttt{train\_epoch()} \\
-Reconstruction loss & Eq.~\ref{eq:recon-loss} & \texttt{src/train/trainer.py}: \texttt{nn.MSELoss()} as \texttt{criterion\_recon} \\
-Level map construction & Eq.~\ref{eq:level-map}--\ref{eq:rounded-level} & \texttt{src/models/quantization.py}: \texttt{AdaptiveQuantizer.forward()} \\
-Rate proxy (global/norm-global/norm-bg) & Eq.~\ref{eq:rate-global}--\ref{eq:rate-norm-bg} & \texttt{src/train/trainer.py}: \texttt{\_compute\_rate\_loss()} with \texttt{rate\_loss\_mode} \\
-Weighted BCE importance & Eq.~\ref{eq:imp-bce}--\ref{eq:imp-posweight} & \texttt{src/train/trainer.py}: \texttt{\_build\_importance\_pos\_weight()}, \texttt{\_compute\_importance\_loss()} \\
-ROI/BG separation margin & Eq.~\ref{eq:sep-loss} & \texttt{src/train/trainer.py}: \texttt{\_compute\_importance\_separation()} \\
-Distillation objective & Eq.~\ref{eq:distill-total} & \texttt{src/loss/distill\_loss.py}: \texttt{DistillLoss}; invoked in \texttt{src/train/trainer.py} \\
-Family pipeline & Eq.~\ref{eq:pipeline} & \texttt{src/models/compression.py}, \texttt{src/models/importance\_head.py}, \texttt{src/models/stage3\_necks.py} \\
+Total objective composition & Eq.~\ref{eq:total-objective} & training loop objective aggregator \\
+Reconstruction MSE & Eq.~\ref{eq:recon-loss} & reconstruction criterion module \\
+Adaptive level mapping & Eq.~\ref{eq:level-map}--\ref{eq:rounded-level} & adaptive quantization module \\
+Rate proxy variants & Eq.~\ref{eq:rate-global}--\ref{eq:rate-norm-bg} & rate regularization module with mode selection \\
+Weighted ROI supervision & Eq.~\ref{eq:imp-bce}--\ref{eq:imp-posweight} & importance supervision module \\
+ROI--BG margin regularization & Eq.~\ref{eq:sep-loss} & importance separation regularizer \\
+Feature/logit distillation & Eq.~\ref{eq:distill-total} & teacher--student distillation module \\
+End-to-end family pipeline & Eq.~\ref{eq:pipeline} & encoder, ROI branch, quantizer, decoder stack \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\section{Reproducibility Configuration}\label{apx:repro}
+\section{Experimental Protocol Summary}\label{apx:protocol}
 \begin{table}[!htb]
-\caption{Primary experiment scripts and defaults}
-\label{tab:appendix-scripts}
+\caption{Protocol summary by model family}
+\label{tab:protocol-summary}
 \centering
 \small
 \begin{tabular}{l l l}
 \toprule
-\textbf{Family} & \textbf{Script} & \textbf{Key defaults} \\
+\textbf{Family} & \textbf{Quantization strategy} & \textbf{Supervisory signals} \\
 \midrule
-UB & \texttt{src/scripts/run\_uniform\_baseline.sh} & \texttt{quantizer\_mode=uniform}, bits sweep \{4,6,8\} \\
-ARS & \texttt{src/scripts/run\_stage1.sh} & \texttt{balanced\_v1}, \texttt{normalized\_global}, weighted BCE \\
-ADS & \texttt{src/scripts/run\_stage2.sh} & \texttt{balanced\_v2}, \texttt{normalized\_bg}, distill sweep \(\lambda_d\in\{0.1,0.5,1.0\}\) \\
-MS-ADS & \texttt{src/scripts/run\_stage3\_multiscale\_heads.sh} & head sweep \{\texttt{bifpn}, \texttt{deformable\_msa}, \texttt{dynamic}, \texttt{rangeformer}, \texttt{frnet}\} \\
+UB & uniform latent quantization & reconstruction only \\
+ARS & adaptive ROI-aware quantization & reconstruction + ROI supervision + rate regularization \\
+ADS & adaptive ROI-aware quantization & ARS objective + distillation + ROI/BG separation \\
+MS-ADS & adaptive ROI-aware quantization & ADS objective with multi-scale ROI branch variants \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Teacher backend for ADS/MS-ADS is \texttt{pointpillars\_zhulf}, using checkpoint
-\begin{equation}
-\texttt{data/checkpoints/pointpillars\_epoch\_160.pth}.
-\end{equation}
+Teacher-guided settings use a pretrained PointPillars-based detector teacher. Full-sweep experiments are 150 epochs, and quick diagnostic analyses are performed on a 16-frame subset.
 
-\section{Artifact Index and Planned Figures}\label{apx:artifacts}
-The following artifacts were used to build the result tables in this draft:
-\begin{itemize}
-    \item \texttt{src/results/experiments\_result.csv}
-    \item \texttt{src/results/experiments\_result.md}
-    \item \texttt{notebooks/quick\_eval\_summary\_16frames.csv}
-    \item \texttt{notebooks/oracle\_eval\_summary\_260219\_resnet\_pilot\_s1adapt.csv}
-    \item \texttt{notebooks/oracle\_eval\_summary\_260219\_resnet\_pilot\_s2distill.csv}
-    \item \texttt{notebooks/matched\_bitrate\_pairs\_260219\_pilot.csv}
-\end{itemize}
+\section{Data Artifacts and Figure Plan}\label{apx:artifacts}
+The quantitative results in this draft are built from three artifact groups: (1) the global experiment ledger, (2) 16-frame quality diagnostics, and (3) native-vs-oracle decomposition summaries.
 
-No figures are inserted in this revision. The next revision should add: (i) threshold sweep curves (precision/recall/IoU), (ii) matched-budget bitrate-distortion plots, and (iii) qualitative panels of input channels, GT ROI, predicted importance, and thresholded ROI.
+Figures are intentionally omitted in this revision. The next revision should include (i) precision/recall/IoU threshold sweeps, (ii) matched-budget bitrate--distortion plots, and (iii) qualitative panels showing input channels, ground-truth ROI, predicted importance, and thresholded ROI.

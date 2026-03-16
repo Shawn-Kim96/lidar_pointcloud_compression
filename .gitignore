@@ -2,6 +2,8 @@
 checkpoints/
 data/
 logs/
+.omx_remote_backup/
+third_party/
 
 
 # Created by https://www.toptal.com/developers/gitignore/api/python,visualstudiocode,macos

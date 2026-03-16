@@ -50,6 +50,17 @@ class Trainer:
         self.w_rate = float(loss_cfg["w_rate"])
         self.w_importance = float(loss_cfg["w_importance"])
         self.w_imp_separation = float(loss_cfg.get("w_imp_separation", 0.0))
+        self.recon_loss_mode = str(loss_cfg.get("recon_loss_mode", "mse")).lower()
+        if self.recon_loss_mode not in ("mse", "masked_channel_weighted"):
+            raise ValueError("recon_loss_mode must be one of: mse, masked_channel_weighted")
+        self.recon_range_weight = float(loss_cfg.get("recon_range_weight", 1.0))
+        self.recon_xyz_weight = float(loss_cfg.get("recon_xyz_weight", 1.0))
+        self.recon_remission_weight = float(loss_cfg.get("recon_remission_weight", 1.0))
+        self.w_ray_consistency = float(loss_cfg.get("w_ray_consistency", 0.0))
+        data_cfg = config.get("data", {})
+        self.fov_up_deg = float(data_cfg.get("fov_up_deg", 3.0))
+        self.fov_down_deg = float(data_cfg.get("fov_down_deg", -25.0))
+        self._ray_grid_cache = {}
 
         self.loss_recipe = str(loss_cfg.get("recipe", "legacy")).lower()
         if self.loss_recipe not in ("legacy", "balanced_v1", "balanced_v2"):
@@ -102,6 +113,7 @@ class Trainer:
         self.uniform_bits = int(quantizer_cfg.get("uniform_bits", quantizer_cfg.get("quant_bits", 8)))
         self.roi_levels = float(quantizer_cfg.get("roi_levels", 256.0))
         self.bg_levels = float(quantizer_cfg.get("bg_levels", 16.0))
+        self.pillar_side_enabled = bool(config.get("model", {}).get("pillar_side_config", {}).get("enabled", False))
 
         supervision_cfg = config.get("supervision", {})
         self.supervision_type = supervision_cfg.get("type", "roi")
@@ -198,6 +210,72 @@ class Trainer:
         bg_mean = (probs * bg_mask).sum() / bg_mask.sum().clamp(min=1.0)
         return F.relu(self.imp_separation_margin - (roi_mean - bg_mean))
 
+    def _compute_recon_loss(self, recon, data, valid_mask):
+        if self.recon_loss_mode == "mse":
+            return self.criterion_recon(recon, data)
+
+        if valid_mask is None:
+            valid_mask = torch.ones(
+                (data.shape[0], 1, data.shape[2], data.shape[3]),
+                device=data.device,
+                dtype=data.dtype,
+            )
+        valid_mask = valid_mask.float()
+        if valid_mask.shape[1] != 1:
+            valid_mask = valid_mask[:, :1]
+
+        sq = (recon - data) ** 2
+        denom = valid_mask.sum().clamp(min=1.0)
+
+        range_loss = (sq[:, 0:1] * valid_mask).sum() / denom
+        xyz_loss = (sq[:, 1:4] * valid_mask).sum() / (denom * 3.0)
+        rem_loss = (sq[:, 4:5] * valid_mask).sum() / denom
+
+        return (
+            self.recon_range_weight * range_loss
+            + self.recon_xyz_weight * xyz_loss
+            + self.recon_remission_weight * rem_loss
+        )
+
+    def _get_ray_grid(self, height: int, width: int, device, dtype):
+        key = (height, width, str(device), str(dtype), round(self.fov_up_deg, 4), round(self.fov_down_deg, 4))
+        if key not in self._ray_grid_cache:
+            rows = (torch.arange(height, device=device, dtype=torch.float32) + 0.5) / float(height)
+            cols = (torch.arange(width, device=device, dtype=torch.float32) + 0.5) / float(width)
+            yaw = (2.0 * cols - 1.0) * torch.pi
+            fov_up = torch.deg2rad(torch.tensor(self.fov_up_deg, device=device, dtype=torch.float32))
+            fov_down = torch.deg2rad(torch.tensor(self.fov_down_deg, device=device, dtype=torch.float32))
+            pitch = fov_up - rows * (fov_up - fov_down)
+            cos_pitch = torch.cos(pitch)[:, None]
+            sin_pitch = torch.sin(pitch)[:, None]
+            cos_yaw = torch.cos(yaw)[None, :]
+            sin_yaw = torch.sin(yaw)[None, :]
+            ray_x = cos_pitch * cos_yaw
+            ray_y = -cos_pitch * sin_yaw
+            ray_z = sin_pitch.expand(height, width)
+            rays = torch.stack([ray_x, ray_y, ray_z], dim=0).to(dtype=dtype)
+            self._ray_grid_cache[key] = rays
+        return self._ray_grid_cache[key]
+
+    def _compute_ray_consistency_loss(self, recon, valid_mask):
+        if self.w_ray_consistency <= 0.0:
+            return torch.tensor(0.0, device=self.device)
+        if valid_mask is None:
+            valid_mask = torch.ones(
+                (recon.shape[0], 1, recon.shape[-2], recon.shape[-1]),
+                device=recon.device,
+                dtype=recon.dtype,
+            )
+        elif valid_mask.dim() == 3:
+            valid_mask = valid_mask.unsqueeze(1)
+        valid_mask = valid_mask.float()
+        rays = self._get_ray_grid(recon.shape[-2], recon.shape[-1], recon.device, recon.dtype).unsqueeze(0)
+        pred_range = recon[:, 0:1]
+        pred_xyz = recon[:, 2:5]
+        expected_xyz = pred_range * rays
+        denom = (valid_mask.sum() * 3.0).clamp(min=1.0)
+        return (((pred_xyz - expected_xyz) ** 2) * valid_mask).sum() / denom
+
     def _estimate_rate_stats(self, aux):
         rate_proxy = float("nan")
         eq_bits = float("nan")
@@ -211,9 +289,14 @@ class Trainer:
         elif self.quantizer_mode == "uniform":
             rate_proxy = float((2 ** self.uniform_bits) - 1)
             eq_bits = float(self.uniform_bits)
+        elif self.quantizer_mode == "none":
+            rate_proxy = 0.0
+            eq_bits = 0.0
 
         codes = aux.get("codes", None)
-        if codes is not None:
+        if self.quantizer_mode == "none":
+            code_entropy = 0.0
+        elif codes is not None:
             q = torch.round(codes.detach()).to(torch.int64).clamp(min=0)
             q_flat = q.reshape(-1).cpu()
             if q_flat.numel() > 0:
@@ -265,17 +348,26 @@ class Trainer:
             roi_mask = None
             if len(batch) >= 3 and self.supervision_type == "roi":
                  roi_mask = batch[2].to(self.device)
+            raw_points = None
+            raw_point_counts = None
+            if self.pillar_side_enabled:
+                if len(batch) < 5:
+                    raise ValueError("pillar_side training expects raw point tensors in the batch.")
+                raw_points = batch[3].to(self.device)
+                raw_point_counts = batch[4].view(-1).to(self.device)
 
             # Forward
             recon, aux = self.model(
                 data,
                 noise_std=self.config["train"]["noise_std"],
                 quantize=True,
-                importance_map=None # or roi_mask if we want to force it? usually supervised via loss
+                importance_map=None, # or roi_mask if we want to force it? usually supervised via loss
+                raw_points=raw_points,
+                raw_point_counts=raw_point_counts,
             )
             
             # Losses
-            loss_recon = self.criterion_recon(recon, data)
+            loss_recon = self._compute_recon_loss(recon, data, valid_mask)
             
             loss_distill = torch.tensor(0.0, device=self.device)
 
@@ -302,6 +394,7 @@ class Trainer:
                 loss_imp_sep = self._compute_importance_separation(imp_logits, roi_target)
 
             loss_rate = self._compute_rate_loss(aux, roi_target)
+            loss_ray = self._compute_ray_consistency_loss(recon, valid_mask)
 
             if self.teacher and self.w_distill > 0.0:
                 student_features = None
@@ -355,7 +448,8 @@ class Trainer:
                 self.w_distill * loss_distill +
                 self.w_rate * loss_rate +
                 self.w_importance * loss_imp +
-                self.w_imp_separation * loss_imp_sep
+                self.w_imp_separation * loss_imp_sep +
+                self.w_ray_consistency * loss_ray
             )
             
             self.optimizer.zero_grad()

@@ -6,7 +6,6 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --gres=gpu:1
 #SBATCH --time=24:00:00
 #
 # Submit Track-B evaluation on a GPU node:
@@ -30,6 +29,12 @@
 #   MAX_FRAMES=0
 #   WORKERS=0
 #   EVAL_METRIC=kitti
+#   REFERENCE_MODE=original
+#   RECON_QUANT_MODE=native
+#   ORACLE_CLASSES=Car,Pedestrian,Cyclist
+#   ORACLE_DILATE_PX=0
+#   ADAPTIVE_BG_LEVELS_OVERRIDE=-1
+#   ADAPTIVE_ROI_LEVELS_OVERRIDE=-1
 #   SUMMARY_CSV=notebooks/kitti_map_vs_rate_summary.csv
 #   DETAIL_CSV=notebooks/kitti_map_vs_rate_detail.csv
 #   DETECTOR_PAIR_CSV=notebooks/kitti_map_vs_rate_pairs.csv
@@ -61,6 +66,12 @@ REQUIRE_CUDA=${REQUIRE_CUDA:-1}
 MAX_FRAMES=${MAX_FRAMES:-0}
 WORKERS=${WORKERS:-0}
 EVAL_METRIC=${EVAL_METRIC:-kitti}
+REFERENCE_MODE=${REFERENCE_MODE:-original}
+RECON_QUANT_MODE=${RECON_QUANT_MODE:-native}
+ORACLE_CLASSES=${ORACLE_CLASSES:-Car,Pedestrian,Cyclist}
+ORACLE_DILATE_PX=${ORACLE_DILATE_PX:-0}
+ADAPTIVE_BG_LEVELS_OVERRIDE=${ADAPTIVE_BG_LEVELS_OVERRIDE:--1}
+ADAPTIVE_ROI_LEVELS_OVERRIDE=${ADAPTIVE_ROI_LEVELS_OVERRIDE:--1}
 SUMMARY_CSV=${SUMMARY_CSV:-notebooks/kitti_map_vs_rate_summary.csv}
 DETAIL_CSV=${DETAIL_CSV:-notebooks/kitti_map_vs_rate_detail.csv}
 DETECTOR_PAIR_CSV=${DETECTOR_PAIR_CSV:-notebooks/kitti_map_vs_rate_pairs.csv}
@@ -91,6 +102,17 @@ echo "openpcdet_ckpt: ${OPENPCDET_CKPT}"
 echo "workers: ${WORKERS}"
 echo "max_frames: ${MAX_FRAMES}"
 echo "eval_metric: ${EVAL_METRIC}"
+echo "reference_mode: ${REFERENCE_MODE}"
+echo "recon_quant_mode: ${RECON_QUANT_MODE}"
+echo "oracle_classes: ${ORACLE_CLASSES}"
+echo "oracle_dilate_px: ${ORACLE_DILATE_PX}"
+echo "adaptive_bg_levels_override: ${ADAPTIVE_BG_LEVELS_OVERRIDE}"
+echo "adaptive_roi_levels_override: ${ADAPTIVE_ROI_LEVELS_OVERRIDE}"
+echo "slurm_job_nodelist: ${SLURM_JOB_NODELIST:-n/a}"
+echo "slurm_job_gres: ${SLURM_JOB_GRES:-n/a}"
+echo "slurm_job_gpus: ${SLURM_JOB_GPUS:-n/a}"
+echo "slurm_step_gpus: ${SLURM_STEP_GPUS:-n/a}"
+echo "cuda_visible_devices: ${CUDA_VISIBLE_DEVICES:-unset}"
 echo "started_at: $(date '+%Y-%m-%d %H:%M:%S %Z')"
 echo "============================================================"
 
@@ -106,10 +128,15 @@ REQUIRE_CUDA="${REQUIRE_CUDA}" \
 MAX_FRAMES="${MAX_FRAMES}" \
 WORKERS="${WORKERS}" \
 EVAL_METRIC="${EVAL_METRIC}" \
+REFERENCE_MODE="${REFERENCE_MODE}" \
+RECON_QUANT_MODE="${RECON_QUANT_MODE}" \
+ORACLE_CLASSES="${ORACLE_CLASSES}" \
+ORACLE_DILATE_PX="${ORACLE_DILATE_PX}" \
+ADAPTIVE_BG_LEVELS_OVERRIDE="${ADAPTIVE_BG_LEVELS_OVERRIDE}" \
+ADAPTIVE_ROI_LEVELS_OVERRIDE="${ADAPTIVE_ROI_LEVELS_OVERRIDE}" \
 SUMMARY_CSV="${SUMMARY_CSV}" \
 DETAIL_CSV="${DETAIL_CSV}" \
 DETECTOR_PAIR_CSV="${DETECTOR_PAIR_CSV}" \
 "${BASH_RUNNER[@]}" src/scripts/run_kitti_map_vs_rate.sh
 
 echo "[kitti-map-sbatch] done"
-

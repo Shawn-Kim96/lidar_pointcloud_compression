@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -104,34 +104,196 @@ def range_image_to_points_xyzi(
     *,
     range_threshold: float = 1e-3,
     valid_mask: Optional[np.ndarray] = None,
+    unprojection_mode: str = "decoded_xyz",
+    fov_up_deg: float = 3.0,
+    fov_down_deg: float = -25.0,
 ) -> np.ndarray:
     """
     Converts reconstructed range-image tensor back to KITTI-style XYZI points.
 
-    Rules:
-    - Uses channels [x,y,z,intensity] from reconstructed tensor.
-    - Valid if range > threshold and xyz is finite.
-    - Optional additional valid_mask can be provided.
+    Modes:
+    - decoded_xyz: trust reconstructed channels [x,y,z,intensity]
+    - ray: recover xyz from reconstructed range + pixel angles
     """
     if recon_5ch.shape[0] != 5:
         raise ValueError(f"Expected recon_5ch shape [5,H,W], got {recon_5ch.shape}")
 
+    mode = str(unprojection_mode).strip().lower()
     rng = recon_5ch[0]
     inten = recon_5ch[1]
-    x = recon_5ch[2]
-    y = recon_5ch[3]
-    z = recon_5ch[4]
-
-    valid = rng > float(range_threshold)
-    valid &= np.isfinite(x) & np.isfinite(y) & np.isfinite(z)
+    valid = (rng > float(range_threshold)) & np.isfinite(rng)
     if valid_mask is not None:
         valid &= np.asarray(valid_mask, dtype=np.float32) > 0.5
 
     if valid.sum() == 0:
         return np.zeros((0, 4), dtype=np.float32)
 
+    if mode == "decoded_xyz":
+        x = recon_5ch[2]
+        y = recon_5ch[3]
+        z = recon_5ch[4]
+        valid &= np.isfinite(x) & np.isfinite(y) & np.isfinite(z)
+        if valid.sum() == 0:
+            return np.zeros((0, 4), dtype=np.float32)
+    elif mode == "ray":
+        _, img_h, img_w = recon_5ch.shape
+        cols = (np.arange(img_w, dtype=np.float32) + 0.5) / float(img_w)
+        rows = (np.arange(img_h, dtype=np.float32) + 0.5) / float(img_h)
+        yaw = (2.0 * cols - 1.0) * np.pi
+        fov_up = np.deg2rad(float(fov_up_deg))
+        fov_down = np.deg2rad(float(fov_down_deg))
+        pitch = fov_up - rows * (fov_up - fov_down)
+        cos_pitch = np.cos(pitch)[:, None]
+        sin_pitch = np.sin(pitch)[:, None]
+        cos_yaw = np.cos(yaw)[None, :]
+        sin_yaw = np.sin(yaw)[None, :]
+        x = rng * cos_pitch * cos_yaw
+        y = -rng * cos_pitch * sin_yaw
+        z = rng * sin_pitch
+    else:
+        raise ValueError(
+            f"Unsupported unprojection_mode='{unprojection_mode}'. "
+            "Expected one of: decoded_xyz, ray"
+        )
+
     pts = np.stack([x[valid], y[valid], z[valid], inten[valid]], axis=1).astype(np.float32)
     return pts
+
+
+def project_unproject_identity_points(
+    points_xyzi: np.ndarray,
+    *,
+    img_h: int = 64,
+    img_w: int = 1024,
+    fov_up_deg: float = 3.0,
+    fov_down_deg: float = -25.0,
+    range_threshold: float = 1e-3,
+    unprojection_mode: str = "decoded_xyz",
+) -> np.ndarray:
+    """
+    Applies the same projection/unprojection geometry as the codec path, without a learned model.
+
+    This is the "identity" diagnostic baseline used to isolate projection loss from codec loss.
+    """
+    data_5ch, valid_mask = project_points_to_range_image(
+        points_xyzi,
+        img_h=img_h,
+        img_w=img_w,
+        fov_up_deg=fov_up_deg,
+        fov_down_deg=fov_down_deg,
+    )
+    return range_image_to_points_xyzi(
+        data_5ch,
+        range_threshold=range_threshold,
+        valid_mask=valid_mask,
+        unprojection_mode=unprojection_mode,
+        fov_up_deg=fov_up_deg,
+        fov_down_deg=fov_down_deg,
+    )
+
+
+def _normalize_class_name(name: str) -> str:
+    return str(name).strip().lower()
+
+
+def _points_in_box_mask(points_xyz: np.ndarray, box_lidar: np.ndarray) -> np.ndarray:
+    """
+    Returns mask for points inside a single KITTI/OpenPCDet lidar box.
+    box_lidar format: [x, y, z, dx, dy, dz, heading]
+    """
+    if points_xyz.size == 0:
+        return np.zeros((0,), dtype=bool)
+    if box_lidar.shape[0] < 7:
+        raise ValueError(f"Expected box shape [7], got {box_lidar.shape}")
+
+    cx, cy, cz, dx, dy, dz, heading = [float(v) for v in box_lidar[:7]]
+    if dx <= 0.0 or dy <= 0.0 or dz <= 0.0:
+        return np.zeros((points_xyz.shape[0],), dtype=bool)
+
+    rel = points_xyz - np.array([cx, cy, cz], dtype=np.float32)[None, :]
+    cos_h = float(np.cos(-heading))
+    sin_h = float(np.sin(-heading))
+    local_x = rel[:, 0] * cos_h - rel[:, 1] * sin_h
+    local_y = rel[:, 0] * sin_h + rel[:, 1] * cos_h
+    local_z = rel[:, 2]
+
+    hx, hy, hz = dx * 0.5, dy * 0.5, dz * 0.5
+    inside = (
+        (np.abs(local_x) <= hx)
+        & (np.abs(local_y) <= hy)
+        & (np.abs(local_z) <= hz)
+    )
+    return inside
+
+
+def _dilate_binary_mask(mask_hw: np.ndarray, radius_px: int) -> np.ndarray:
+    radius = int(max(0, radius_px))
+    if radius == 0:
+        return mask_hw.astype(np.float32)
+    kernel = 2 * radius + 1
+    t = torch.from_numpy(mask_hw.astype(np.float32)).unsqueeze(0).unsqueeze(0)
+    # Max-pool acts as binary dilation for {0,1} masks.
+    dilated = torch.nn.functional.max_pool2d(t, kernel_size=kernel, stride=1, padding=radius)
+    return dilated.squeeze(0).squeeze(0).cpu().numpy().astype(np.float32)
+
+
+def build_oracle_importance_map_from_gt(
+    data_5ch: np.ndarray,
+    valid_mask: np.ndarray,
+    gt_boxes_lidar: Optional[np.ndarray],
+    gt_names: Optional[Sequence[str]] = None,
+    include_classes: Optional[Sequence[str]] = None,
+    dilate_px: int = 0,
+) -> np.ndarray:
+    """
+    Builds per-pixel oracle importance from GT lidar boxes by marking projected
+    points that fall inside selected GT boxes.
+    """
+    if data_5ch.ndim != 3 or data_5ch.shape[0] != 5:
+        raise ValueError(f"Expected data_5ch shape [5,H,W], got {data_5ch.shape}")
+    if valid_mask.ndim != 2:
+        raise ValueError(f"Expected valid_mask shape [H,W], got {valid_mask.shape}")
+
+    valid = valid_mask > 0.5
+    imp = np.zeros(valid_mask.shape, dtype=np.float32)
+    if valid.sum() == 0:
+        return imp
+
+    if gt_boxes_lidar is None:
+        return imp
+
+    boxes = np.asarray(gt_boxes_lidar, dtype=np.float32).reshape(-1, 7)
+    if boxes.size == 0:
+        return imp
+
+    class_filter = None
+    if include_classes is not None:
+        class_filter = {_normalize_class_name(x) for x in include_classes if str(x).strip()}
+        if len(class_filter) == 0:
+            class_filter = None
+
+    names: Optional[np.ndarray] = None
+    if gt_names is not None:
+        names = np.asarray(gt_names)
+        if names.ndim == 0:
+            names = names.reshape(1)
+
+    xyz_hw3 = np.stack([data_5ch[2], data_5ch[3], data_5ch[4]], axis=-1)
+    pts = xyz_hw3[valid]
+    roi_flat = np.zeros((pts.shape[0],), dtype=bool)
+
+    for bi in range(boxes.shape[0]):
+        if names is not None and bi < names.shape[0] and class_filter is not None:
+            cname = _normalize_class_name(str(names[bi]))
+            if cname not in class_filter:
+                continue
+        inside = _points_in_box_mask(pts, boxes[bi])
+        roi_flat |= inside
+
+    imp[valid] = roi_flat.astype(np.float32)
+    if int(dilate_px) > 0:
+        imp = _dilate_binary_mask(imp, int(dilate_px))
+    return imp
 
 
 def _estimate_code_entropy(codes: torch.Tensor) -> float:
@@ -160,6 +322,17 @@ def estimate_rate_metrics_from_aux(
     bpp_eq = float("nan")
     bpp_entropy = float("nan")
     bpp_true = float("nan")
+    quantizer_mode = str(aux.get("quantizer_mode", "")).strip().lower()
+
+    if quantizer_mode == "none":
+        return {
+            "rate_proxy": 0.0,
+            "eq_bits": 0.0,
+            "code_entropy": 0.0,
+            "bpp_eq": 0.0,
+            "bpp_entropy": 0.0,
+            "bpp_true": 0.0,
+        }
 
     level_map = aux.get("level_map", None)
     codes = aux.get("codes", None)
@@ -208,6 +381,14 @@ def reconstruct_kitti_points_with_model(
     fov_down_deg: float = -25.0,
     range_threshold: float = 1e-3,
     uniform_bits_fallback: int = 8,
+    unprojection_mode: str = "decoded_xyz",
+    quant_mode: str = "native",
+    oracle_gt_boxes_lidar: Optional[np.ndarray] = None,
+    oracle_gt_names: Optional[Sequence[str]] = None,
+    oracle_classes: Optional[Sequence[str]] = None,
+    oracle_dilate_px: int = 0,
+    adaptive_bg_levels_override: Optional[int] = None,
+    adaptive_roi_levels_override: Optional[int] = None,
 ) -> Tuple[np.ndarray, Dict[str, float], Dict[str, np.ndarray]]:
     """
     Reconstructs KITTI XYZI points through the compression model.
@@ -215,7 +396,7 @@ def reconstruct_kitti_points_with_model(
     Returns:
       recon_points_xyzi: [M,4]
       rate_metrics: scalar dictionary
-      debug_payload: {"input_5ch", "recon_5ch", "valid_mask"}
+      debug_payload: {"input_5ch", "recon_5ch", "valid_mask", ...}
     """
     data_5ch, valid_mask = project_points_to_range_image(
         points_xyzi,
@@ -225,22 +406,91 @@ def reconstruct_kitti_points_with_model(
         fov_down_deg=fov_down_deg,
     )
 
+    quant_mode_norm = str(quant_mode).strip().lower()
+    importance_override_np: Optional[np.ndarray] = None
+    if quant_mode_norm == "oracle_roi":
+        importance_override_np = build_oracle_importance_map_from_gt(
+            data_5ch=data_5ch,
+            valid_mask=valid_mask,
+            gt_boxes_lidar=oracle_gt_boxes_lidar,
+            gt_names=oracle_gt_names,
+            include_classes=oracle_classes,
+            dilate_px=int(oracle_dilate_px),
+        )
+    elif quant_mode_norm != "native":
+        raise ValueError(
+            f"Unsupported quant_mode='{quant_mode}'. Expected one of: native, oracle_roi"
+        )
+
     x = torch.from_numpy(data_5ch).unsqueeze(0).to(device)
-    recon, aux = model(x, noise_std=float(noise_std), quantize=bool(quantize))
+    raw_points_t = torch.from_numpy(np.asarray(points_xyzi[:, :4], dtype=np.float32)).unsqueeze(0).to(device)
+    raw_point_counts_t = torch.tensor([points_xyzi.shape[0]], device=device, dtype=torch.long)
+    model_kwargs = {
+        "noise_std": float(noise_std),
+        "quantize": bool(quantize),
+        "raw_points": raw_points_t,
+        "raw_point_counts": raw_point_counts_t,
+    }
+    if importance_override_np is not None:
+        model_kwargs["importance_map"] = (
+            torch.from_numpy(importance_override_np)
+            .unsqueeze(0)
+            .unsqueeze(0)
+            .to(device=device, dtype=torch.float32)
+        )
+
+    quantizer = getattr(model, "quantizer", None)
+    restore_bg = None
+    restore_roi = None
+    if quantizer is not None:
+        if hasattr(quantizer, "bg_levels"):
+            restore_bg = int(quantizer.bg_levels)
+        if hasattr(quantizer, "roi_levels"):
+            restore_roi = int(quantizer.roi_levels)
+    if adaptive_bg_levels_override is not None:
+        if quantizer is None or not hasattr(quantizer, "bg_levels"):
+            raise ValueError("adaptive_bg_levels_override requires an adaptive quantizer with bg_levels.")
+        bg_override = int(adaptive_bg_levels_override)
+        if bg_override < 2:
+            raise ValueError(f"adaptive_bg_levels_override must be >=2, got {bg_override}")
+        quantizer.bg_levels = bg_override
+    if adaptive_roi_levels_override is not None:
+        if quantizer is None or not hasattr(quantizer, "roi_levels"):
+            raise ValueError("adaptive_roi_levels_override requires an adaptive quantizer with roi_levels.")
+        roi_override = int(adaptive_roi_levels_override)
+        if roi_override < 2:
+            raise ValueError(f"adaptive_roi_levels_override must be >=2, got {roi_override}")
+        quantizer.roi_levels = roi_override
+
+    try:
+        recon, aux = model(x, **model_kwargs)
+    finally:
+        if quantizer is not None:
+            if restore_bg is not None and hasattr(quantizer, "bg_levels"):
+                quantizer.bg_levels = restore_bg
+            if restore_roi is not None and hasattr(quantizer, "roi_levels"):
+                quantizer.roi_levels = restore_roi
+
     recon_np = recon.squeeze(0).detach().cpu().numpy().astype(np.float32)
 
     recon_points = range_image_to_points_xyzi(
         recon_np,
         range_threshold=range_threshold,
         valid_mask=valid_mask,
+        unprojection_mode=unprojection_mode,
+        fov_up_deg=fov_up_deg,
+        fov_down_deg=fov_down_deg,
     )
     rate_metrics = estimate_rate_metrics_from_aux(
         aux=aux,
         input_hw=(img_h, img_w),
         uniform_bits_fallback=uniform_bits_fallback,
     )
-    return recon_points, rate_metrics, {
+    debug_payload: Dict[str, np.ndarray] = {
         "input_5ch": data_5ch,
         "recon_5ch": recon_np,
         "valid_mask": valid_mask.astype(np.float32),
     }
+    if importance_override_np is not None:
+        debug_payload["importance_map_override"] = importance_override_np.astype(np.float32)
+    return recon_points, rate_metrics, debug_payload

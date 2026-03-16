@@ -2,7 +2,7 @@
 # Evaluate detector endpoint on KITTI with strict protocol:
 #  1) official KITTI root validation + OpenPCDet info generation
 #  2) original PointPillar sanity check (Car AP(mod) must be > 0)
-#  3) reconstructed-vs-original comparison (same cfg/ckpt/split/metric)
+#  3) reconstructed-vs-reference comparison (same cfg/ckpt/split/metric)
 #
 # Required env:
 #   KITTI_ROOT_OFFICIAL=/path/to/official_kitti_detection_format
@@ -20,6 +20,10 @@
 #   SANITY_BATCH_SIZE=1
 #   SANITY_MAX_RETRIES=3
 #   SANITY_RETRY_SLEEP_SEC=20
+#   CUDA_OP_SMOKE_TEST=1
+#   SMOKE_MAX_RETRIES=3
+#   SMOKE_RETRY_SLEEP_SEC=20
+#   AUTO_SELECT_FREE_GPU=1
 #   REQUIRE_CUDA=1
 #   KITTI_MAX_SPLIT_SAMPLES=10000
 #   KITTI_MAX_TRAIN_FILES=10000
@@ -32,6 +36,12 @@
 #   SPLIT=val
 #   SPLIT_MANIFEST=/path/to/ImageSets/val.txt
 #   EVAL_METRIC=kitti
+#   REFERENCE_MODE=original   (or identity for Track 1)
+#   RECON_QUANT_MODE=native   (or oracle_roi)
+#   ORACLE_CLASSES=Car,Pedestrian,Cyclist
+#   ORACLE_DILATE_PX=0
+#   ADAPTIVE_BG_LEVELS_OVERRIDE=-1
+#   ADAPTIVE_ROI_LEVELS_OVERRIDE=-1
 #   TEACHER_AP3D_MOD_CAR_MIN=55.0
 #   BITRATE_MATCH_METRIC=bpp_entropy_mean
 #   BITRATE_PAIR_MAX_GAP=0.05
@@ -75,12 +85,21 @@ RUN_ORIGINAL_SANITY=${RUN_ORIGINAL_SANITY:-1}
 SANITY_BATCH_SIZE=${SANITY_BATCH_SIZE:-1}
 SANITY_MAX_RETRIES=${SANITY_MAX_RETRIES:-3}
 SANITY_RETRY_SLEEP_SEC=${SANITY_RETRY_SLEEP_SEC:-20}
+CUDA_OP_SMOKE_TEST=${CUDA_OP_SMOKE_TEST:-1}
+SMOKE_MAX_RETRIES=${SMOKE_MAX_RETRIES:-3}
+SMOKE_RETRY_SLEEP_SEC=${SMOKE_RETRY_SLEEP_SEC:-20}
+AUTO_SELECT_FREE_GPU=${AUTO_SELECT_FREE_GPU:-1}
 REQUIRE_CUDA=${REQUIRE_CUDA:-1}
 KITTI_MAX_SPLIT_SAMPLES=${KITTI_MAX_SPLIT_SAMPLES:-10000}
 KITTI_MAX_TRAIN_FILES=${KITTI_MAX_TRAIN_FILES:-10000}
 KITTI_MIN_TRAIN_SAMPLES=${KITTI_MIN_TRAIN_SAMPLES:-1000}
 KITTI_MIN_VAL_SAMPLES=${KITTI_MIN_VAL_SAMPLES:-1000}
 REQUIRE_DISJOINT_TRAIN_VAL=${REQUIRE_DISJOINT_TRAIN_VAL:-1}
+IMG_H=${IMG_H:-64}
+IMG_W=${IMG_W:-1024}
+FOV_UP_DEG=${FOV_UP_DEG:-3.0}
+FOV_DOWN_DEG=${FOV_DOWN_DEG:--25.0}
+UNPROJECTION_MODE=${UNPROJECTION_MODE:-decoded_xyz}
 
 KITTI_ROOT_OFFICIAL=${KITTI_ROOT_OFFICIAL:-${KITTI_ROOT:-}}
 if [[ -z "${KITTI_ROOT_OFFICIAL}" ]]; then
@@ -127,6 +146,31 @@ if [[ "${KITTI_ROOT}" != /* ]]; then
   KITTI_ROOT="${ROOT_DIR}/${KITTI_ROOT}"
 fi
 
+# Bind to Slurm-assigned GPU when available; otherwise pick the freest GPU on the node.
+if [[ -z "${CUDA_VISIBLE_DEVICES:-}" ]]; then
+  RAW_JOB_GPUS="${SLURM_STEP_GPUS:-${SLURM_JOB_GPUS:-}}"
+  if [[ -n "${RAW_JOB_GPUS}" ]]; then
+    FIRST_GPU="${RAW_JOB_GPUS%%,*}"
+    if [[ "${FIRST_GPU}" == *"["* ]]; then
+      FIRST_GPU="${FIRST_GPU#*[}"
+      FIRST_GPU="${FIRST_GPU%%]*}"
+    fi
+    FIRST_GPU="${FIRST_GPU//[^0-9]/}"
+    if [[ -n "${FIRST_GPU}" ]]; then
+      export CUDA_VISIBLE_DEVICES="${FIRST_GPU}"
+    fi
+  fi
+fi
+
+if [[ -z "${CUDA_VISIBLE_DEVICES:-}" && "${AUTO_SELECT_FREE_GPU}" == "1" ]] && command -v nvidia-smi >/dev/null 2>&1; then
+  BEST_GPU="$(nvidia-smi --query-gpu=index,memory.free --format=csv,noheader,nounits 2>/dev/null | sort -t',' -k2 -nr | head -n 1 | cut -d',' -f1 | tr -d '[:space:]')"
+  if [[ "${BEST_GPU}" =~ ^[0-9]+$ ]]; then
+    export CUDA_VISIBLE_DEVICES="${BEST_GPU}"
+  fi
+fi
+
+echo "[slurm-gpu] job_gpus=${SLURM_JOB_GPUS:-unset} step_gpus=${SLURM_STEP_GPUS:-unset} cuda_visible_devices=${CUDA_VISIBLE_DEVICES:-unset}"
+
 echo "[kitti-map] python_env=${PY_ENV_DESC}"
 echo "[kitti-map] kitti_root_official=${KITTI_ROOT_OFFICIAL}"
 echo "[kitti-map] kitti_root_link=${KITTI_ROOT_LINK}"
@@ -134,6 +178,10 @@ echo "[kitti-map] kitti_root_eval=${KITTI_ROOT}"
 echo "[kitti-map] run_dirs=${RUN_DIRS}"
 echo "[kitti-map] cfg=${OPENPCDET_CFG}"
 echo "[kitti-map] ckpt=${OPENPCDET_CKPT}"
+echo "[kitti-map] reference_mode=${REFERENCE_MODE:-original}"
+echo "[kitti-map] recon_quant_mode=${RECON_QUANT_MODE:-native} oracle_classes=${ORACLE_CLASSES:-Car,Pedestrian,Cyclist} oracle_dilate_px=${ORACLE_DILATE_PX:-0}"
+echo "[kitti-map] adaptive_bg_levels_override=${ADAPTIVE_BG_LEVELS_OVERRIDE:--1} adaptive_roi_levels_override=${ADAPTIVE_ROI_LEVELS_OVERRIDE:--1}"
+echo "[kitti-map] projection=${IMG_H}x${IMG_W} fov_up=${FOV_UP_DEG} fov_down=${FOV_DOWN_DEG} unprojection=${UNPROJECTION_MODE}"
 
 # Sanity check expected KITTI detection format.
 MISSING_LAYOUT=0
@@ -229,6 +277,47 @@ PY
   fi
 fi
 
+if [[ "${CUDA_OP_SMOKE_TEST}" == "1" ]]; then
+  smoke_attempt=1
+  while true; do
+    set +e
+    CUDA_SMOKE_OUT="$("${PYTHON_RUNNER[@]}" - <<'PY' 2>&1
+import torch
+from pcdet.ops.iou3d_nms import iou3d_nms_utils
+
+if not torch.cuda.is_available():
+    raise SystemExit("CUDA unavailable during smoke test")
+
+boxes_a = torch.tensor([[0.0, 0.0, 0.0, 1.6, 3.9, 1.5, 0.0]], device="cuda", dtype=torch.float32)
+boxes_b = torch.tensor([[0.1, 0.1, 0.0, 1.6, 3.9, 1.5, 0.0]], device="cuda", dtype=torch.float32)
+_ = iou3d_nms_utils.boxes_iou3d_gpu(boxes_a, boxes_b)
+props = torch.cuda.get_device_properties(0)
+print(f"[kitti-map] cuda_op_smoke_ok gpu={props.name} sm={props.major}.{props.minor}")
+PY
+)"
+    smoke_status=$?
+    set -e
+    echo "${CUDA_SMOKE_OUT}"
+    if [[ "${smoke_status}" == "0" ]]; then
+      break
+    fi
+    if grep -qi "no kernel image is available for execution on the device" <<<"${CUDA_SMOKE_OUT}"; then
+      echo "Error: OpenPCDet CUDA ops are incompatible with this node's GPU architecture." >&2
+      echo "Error: use a compatible node class or rebuild OpenPCDet CUDA ops for this architecture." >&2
+      exit 1
+    fi
+    if [[ "${smoke_attempt}" -lt "${SMOKE_MAX_RETRIES}" ]] && \
+       grep -qiE "CUDA-capable device\\(s\\) is/are busy or unavailable|CUDA error: out of memory" <<<"${CUDA_SMOKE_OUT}"; then
+      echo "[kitti-map][warn] transient CUDA smoke failure (attempt ${smoke_attempt}/${SMOKE_MAX_RETRIES}); retrying in ${SMOKE_RETRY_SLEEP_SEC}s ..."
+      sleep "${SMOKE_RETRY_SLEEP_SEC}"
+      smoke_attempt=$((smoke_attempt + 1))
+      continue
+    fi
+    echo "Error: CUDA op smoke test failed before sanity evaluation." >&2
+    exit 1
+  done
+fi
+
 INFO_TRAIN="${KITTI_ROOT_LINK}/kitti_infos_train.pkl"
 INFO_VAL="${KITTI_ROOT_LINK}/kitti_infos_val.pkl"
 if [[ "${REBUILD_KITTI_INFOS}" == "1" || ! -f "${INFO_TRAIN}" || ! -f "${INFO_VAL}" ]]; then
@@ -251,6 +340,12 @@ MAX_FRAMES=${MAX_FRAMES:-0}
 SPLIT=${SPLIT:-val}
 SPLIT_MANIFEST=${SPLIT_MANIFEST:-}
 EVAL_METRIC=${EVAL_METRIC:-kitti}
+REFERENCE_MODE=${REFERENCE_MODE:-original}
+RECON_QUANT_MODE=${RECON_QUANT_MODE:-native}
+ORACLE_CLASSES=${ORACLE_CLASSES:-Car,Pedestrian,Cyclist}
+ORACLE_DILATE_PX=${ORACLE_DILATE_PX:-0}
+ADAPTIVE_BG_LEVELS_OVERRIDE=${ADAPTIVE_BG_LEVELS_OVERRIDE:--1}
+ADAPTIVE_ROI_LEVELS_OVERRIDE=${ADAPTIVE_ROI_LEVELS_OVERRIDE:--1}
 TEACHER_AP3D_MOD_CAR_MIN=${TEACHER_AP3D_MOD_CAR_MIN:-55.0}
 BITRATE_MATCH_METRIC=${BITRATE_MATCH_METRIC:-bpp_entropy_mean}
 BITRATE_PAIR_MAX_GAP=${BITRATE_PAIR_MAX_GAP:-0.05}
@@ -260,6 +355,11 @@ SUMMARY_CSV=${SUMMARY_CSV:-notebooks/kitti_map_vs_rate_summary.csv}
 DETAIL_CSV=${DETAIL_CSV:-notebooks/kitti_map_vs_rate_detail.csv}
 DETECTOR_PAIR_CSV=${DETECTOR_PAIR_CSV:-notebooks/kitti_map_vs_rate_pairs.csv}
 UPDATE_PAPER_TABLE=${UPDATE_PAPER_TABLE:-1}
+
+if [[ "${REFERENCE_MODE}" == "identity" && "${RUN_ORIGINAL_SANITY}" == "1" ]]; then
+  echo "[kitti-map][warn] reference_mode=identity disables raw tools/test.py sanity because Track 1 should gate on the identity baseline."
+  RUN_ORIGINAL_SANITY=0
+fi
 
 if [[ "${RUN_ORIGINAL_SANITY}" == "1" ]]; then
   CAR_AP3D_MOD=""
@@ -281,6 +381,11 @@ if [[ "${RUN_ORIGINAL_SANITY}" == "1" ]]; then
     set -e
     if [[ "${sanity_status}" == "0" ]]; then
       break
+    fi
+    if grep -qi "no kernel image is available for execution on the device" "${SANITY_LOG}"; then
+      echo "Error: sanity failed due to CUDA kernel-image mismatch on this node's GPU architecture." >&2
+      echo "Error: use a compatible node class or rebuild OpenPCDet CUDA ops for this architecture." >&2
+      exit 1
     fi
     if grep -qi "CUDA-capable device(s) is/are busy or unavailable" "${SANITY_LOG}" && [[ "${attempt}" -lt "${SANITY_MAX_RETRIES}" ]]; then
       echo "[kitti-map][warn] sanity failed due to transient CUDA busy/unavailable, retrying in ${SANITY_RETRY_SLEEP_SEC}s ..."
@@ -356,6 +461,17 @@ fi
   --split "${SPLIT}" \
   "${SPLIT_MANIFEST_FLAG[@]}" \
   --eval_metric "${EVAL_METRIC}" \
+  --img_h "${IMG_H}" \
+  --img_w "${IMG_W}" \
+  --fov_up_deg "${FOV_UP_DEG}" \
+  --fov_down_deg "${FOV_DOWN_DEG}" \
+  --unprojection_mode "${UNPROJECTION_MODE}" \
+  --reference_mode "${REFERENCE_MODE}" \
+  --recon_quant_mode "${RECON_QUANT_MODE}" \
+  --oracle_classes "${ORACLE_CLASSES}" \
+  --oracle_dilate_px "${ORACLE_DILATE_PX}" \
+  --adaptive_bg_levels_override "${ADAPTIVE_BG_LEVELS_OVERRIDE}" \
+  --adaptive_roi_levels_override "${ADAPTIVE_ROI_LEVELS_OVERRIDE}" \
   --teacher_ap3d_mod_car_min "${TEACHER_AP3D_MOD_CAR_MIN}" \
   --bitrate_match_metric "${BITRATE_MATCH_METRIC}" \
   --bitrate_pair_max_gap "${BITRATE_PAIR_MAX_GAP}" \
@@ -364,15 +480,16 @@ fi
   --output_detail_csv "${DETAIL_CSV}" \
   "${TABLE_FLAG[@]}"
 
-WRAPPER_ORIG_AP="$("${PYTHON_RUNNER[@]}" - "${SUMMARY_CSV}" <<'PY'
+WRAPPER_REF_AP="$("${PYTHON_RUNNER[@]}" - "${SUMMARY_CSV}" "${REFERENCE_MODE}" <<'PY'
 import csv
 import sys
 
 path = sys.argv[1]
+reference_mode = str(sys.argv[2]).strip().lower()
 ap_vals = []
 with open(path, newline="", encoding="utf-8") as f:
     for row in csv.DictReader(f):
-        if str(row.get("mode", "")).strip().lower() != "original":
+        if str(row.get("mode", "")).strip().lower() != reference_mode:
             continue
         try:
             ap_vals.append(float(row.get("ap3d_car_mod", "nan")))
@@ -384,10 +501,10 @@ else:
     print(f"{ap_vals[0]:.6f}")
 PY
 )"
-echo "[kitti-map] wrapper original Car 3D AP(mod)=${WRAPPER_ORIG_AP}"
+echo "[kitti-map] wrapper ${REFERENCE_MODE} Car 3D AP(mod)=${WRAPPER_REF_AP}"
 
-if [[ "${RUN_ORIGINAL_SANITY}" == "1" ]]; then
-  DIAG_STATUS="$("${PYTHON_RUNNER[@]}" - "${CAR_AP3D_MOD}" "${WRAPPER_ORIG_AP}" <<'PY'
+if [[ "${RUN_ORIGINAL_SANITY}" == "1" && "${REFERENCE_MODE}" == "original" ]]; then
+  DIAG_STATUS="$("${PYTHON_RUNNER[@]}" - "${CAR_AP3D_MOD}" "${WRAPPER_REF_AP}" <<'PY'
 import math
 import sys
 
