@@ -6,19 +6,16 @@
     <title>LiDAR Point Cloud Compression</title>
     <meta
       name="description"
-      content="Research-in-progress project page for ROI-aware LiDAR point cloud compression with dual downstream evaluation tracks."
+      content="Research project page for detector-facing LiDAR compression, focused on what currently works, what fails, and why."
     />
     <meta name="theme-color" content="#0f766e" />
     <meta property="og:title" content="LiDAR Point Cloud Compression" />
     <meta
       property="og:description"
-      content="ROI-aware LiDAR compression for detector-facing range images, with dual-track evaluation and explicit failure analysis."
+      content="Detector-facing LiDAR compression with dual downstream evaluation and explicit failure analysis."
     />
     <meta property="og:type" content="website" />
-    <meta property="og:image" content="assets/track1-pointpillar-endpoint-panel-web.png" />
-    <script>
-      document.documentElement.classList.add("js");
-    </script>
+    <meta property="og:image" content="assets/track2-rangedet-zoom-panel-web.png" />
     <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="styles.css" />
   </head>
@@ -29,532 +26,270 @@
           <span class="brand-mark">LPC</span>
           <span class="brand-copy">
             <strong>LiDAR Point Cloud Compression</strong>
-            <span>Research project page</span>
+            <span>Project page</span>
           </span>
         </a>
         <nav class="site-nav" aria-label="Primary">
-          <a href="#overview">Overview</a>
-          <a href="#evidence">Evidence</a>
+          <a href="#method">Method</a>
+          <a href="#results">Results</a>
+          <a href="#takeaways">Takeaways</a>
           <a href="gallery.html">Gallery</a>
-          <a href="#failure-analysis">Bottlenecks</a>
-          <a href="#reproducibility">Reproducibility</a>
-          <a href="evidence.html">Claims</a>
-          <a href="asset-gaps.html">Asset Gaps</a>
+          <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression">Code</a>
         </nav>
       </header>
 
       <main>
-        <section class="hero section" data-reveal>
-          <div class="hero-copy">
-            <p class="eyebrow">Research in progress · latest in-repo status through March 16, 2026</p>
-            <h1>ROI-aware LiDAR compression for detector-facing range images</h1>
-            <p class="hero-lede">
-              This project studies whether LiDAR compression can allocate bits by detection relevance instead of
-              treating every spatial region equally. The codebase implements a learned range-image codec, ROI-guided
-              adaptive quantization, dual downstream evaluation tracks, and explicit failure-analysis tooling.
+        <section class="section landing-hero" id="top">
+          <div class="landing-copy">
+            <p class="eyebrow">Research In Progress</p>
+            <h1>Detector-facing LiDAR compression, judged by what survives downstream.</h1>
+            <p class="landing-lede">
+              This project asks a simple question: if a LiDAR codec preserves pixel-level appearance but breaks the
+              detector, what exactly failed? The repository builds a learned range-image compression pipeline, evaluates
+              it in two downstream tracks, and uses qualitative diagnostics to localize the real bottlenecks.
             </p>
             <div class="hero-actions">
               <a class="button button-primary" href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression">View Code</a>
-              <a class="button button-secondary" href="evidence.html">Claims and Evidence</a>
-              <a class="button button-secondary" href="gallery.html">Visual Gallery</a>
-              <a class="button button-secondary" href="asset-gaps.html">Figure Wishlist</a>
+              <a class="button button-secondary" href="gallery.html">View Figures</a>
+              <a class="button button-secondary" href="asset-gaps.html">What Is Still Missing</a>
             </div>
-            <p class="hero-note">
-              The site is intentionally framed as a progress page, not a finalized paper-results site. It shows what
-              is implemented, what the current evidence supports, and where the bottlenecks still are.
-            </p>
+            <ul class="landing-badges">
+              <li>Latest public framing: March 17, 2026</li>
+              <li>Track 1: PointPillars endpoint</li>
+              <li>Track 2: RangeDet endpoint</li>
+            </ul>
           </div>
 
-          <aside class="hero-metrics">
-            <article class="metric-card accent-cyan">
-              <span class="metric-label">Track 1 identity-domain detector</span>
-              <strong class="metric-value">73.67</strong>
-              <span class="metric-detail">mAP3D(mod) top identity-domain PointPillars result in the current summary</span>
-            </article>
-            <article class="metric-card accent-amber">
-              <span class="metric-label">Track 1 reconstructed endpoint</span>
-              <strong class="metric-value">2.19</strong>
-              <span class="metric-detail">best completed reconstructed mAP3D(mod) in current summary</span>
-            </article>
-            <article class="metric-card accent-red">
-              <span class="metric-label">Track 2 raw/basic baseline</span>
-              <strong class="metric-value">0.4979</strong>
-              <span class="metric-detail">AP3D@0.5, enough to blame the codec rather than the detector</span>
-            </article>
-            <article class="metric-card accent-slate">
-              <span class="metric-label">Projection-path retention</span>
-              <strong class="metric-value">41.69%</strong>
-              <span class="metric-detail">mean point retention after project→unproject decomposition</span>
-            </article>
-          </aside>
+          <figure class="hero-visual">
+            <img
+              src="assets/track2-rangedet-overview-zoom.gif"
+              alt="Animated comparison between overview and zoomed RangeDet diagnostic panels."
+              width="1800"
+              height="755"
+              loading="eager"
+              decoding="async"
+            />
+            <figcaption>
+              One representative Track 2 frame: raw/basic detector behavior remains coherent, while reconstructed input
+              introduces structured artifacts that change the detector response rather than simply lowering confidence.
+            </figcaption>
+          </figure>
         </section>
 
-        <section class="section narrative-grid" id="overview" data-reveal>
+        <section class="section quick-summary">
           <div class="section-heading">
-            <p class="eyebrow">Overview</p>
-            <h2>What the repository actually implements</h2>
+            <p class="eyebrow">Abstract</p>
+            <h2>What the project is really about</h2>
           </div>
-          <div class="narrative-layout">
-            <div class="narrative-copy prose-card">
+          <div class="summary-grid">
+            <article class="summary-card">
+              <span class="summary-label">Question</span>
               <p>
-                The active training pipeline uses a 5-channel range image
-                (<code>range</code>, <code>intensity</code>, <code>x</code>, <code>y</code>, <code>z</code>),
-                a <code>resnet</code> or <code>darknet</code> encoder, an ROI importance head, adaptive quantization,
-                and a decoder back to a 5-channel range-image representation.
+                Can a LiDAR codec allocate rate by downstream detection relevance instead of treating every region of
+                the range image equally?
               </p>
+            </article>
+            <article class="summary-card">
+              <span class="summary-label">Current answer</span>
               <p>
-                Stage semantics are explicit in the repo: Stage1 isolates ROI-aware adaptive quantization without
-                distillation, Stage2 adds teacher distillation, and Stage3 is the detector-facing calibration phase
-                that is still being refined.
+                The detector baseline is no longer the main blocker. The dominant failure is now in the compression and
+                reconstruction path.
               </p>
-              <ul class="clean-list">
-                <li><strong>Track 1:</strong> point cloud → range image → point cloud, then detector evaluation with PointPillars.</li>
-                <li><strong>Track 2:</strong> point cloud → range image, then direct range-image detection with RangeDet.</li>
-                <li><strong>Claim policy:</strong> codec diagnostics and detector endpoint metrics are kept separate on purpose.</li>
-              </ul>
-            </div>
+            </article>
+            <article class="summary-card">
+              <span class="summary-label">Why this page exists</span>
+              <p>
+                The work is not paper-finished yet, but the pipeline, failure modes, and strongest intermediate
+                findings are already worth showing clearly.
+              </p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section method-stage" id="method">
+          <div class="section-heading">
+            <p class="eyebrow">Method</p>
+            <h2>Two downstream tracks are used to separate detector issues from codec issues</h2>
+          </div>
+
+          <div class="method-layout">
             <figure class="figure-card">
               <img
                 src="assets/system_architecture-web.png"
                 alt="System architecture diagram for the LiDAR compression model."
                 width="1600"
                 height="790"
-                loading="eager"
+                loading="lazy"
                 decoding="async"
               />
               <figcaption>
-                In-repo architecture figure. The current public page complements this with code-linked evidence and
-                dual-track evaluation rather than claiming final detector-preserving compression.
+                The in-repo model uses a 5-channel range image, an encoder, ROI-aware importance control, adaptive
+                quantization, and a decoder back to detector-facing representations.
               </figcaption>
             </figure>
-          </div>
-        </section>
 
-        <section class="section" data-reveal>
-          <div class="section-heading">
-            <p class="eyebrow">Pipeline</p>
-            <h2>Two tracks are used to localize where performance breaks</h2>
-          </div>
-          <div class="track-grid">
-            <article class="track-card">
-              <div class="track-header">
-                <span class="track-tag">Track 1</span>
-                <h3>Reconstructed point-cloud endpoint</h3>
-              </div>
-              <p>
-                The no-quant chain trains the codec, exports a <code>KITTI_Identity</code> dataset, fine-tunes
-                PointPillars, and evaluates reconstructed point clouds under a detector-facing protocol.
-              </p>
-              <p class="track-script">
-                Core script:
-                <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/src/scripts/run_track1_noquant_chain.sh">
-                  <code>src/scripts/run_track1_noquant_chain.sh</code>
-                </a>
-              </p>
-            </article>
-            <article class="track-card">
-              <div class="track-header">
-                <span class="track-tag">Track 2</span>
-                <h3>Range-image detector endpoint</h3>
-              </div>
-              <p>
-                Reconstructed range images are exported into a RangeDet-compatible dataset layout, then evaluated
-                directly against a repaired raw/basic detector baseline.
-              </p>
-              <p class="track-script">
-                Core script:
-                <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/src/scripts/run_rangedet_stage_eval.sh">
-                  <code>src/scripts/run_rangedet_stage_eval.sh</code>
-                </a>
-              </p>
-            </article>
-            <article class="track-card">
-              <div class="track-header">
-                <span class="track-tag">Stage logic</span>
-                <h3>Compression objectives are not mixed casually</h3>
-              </div>
-              <p>
-                Uniform, adaptive, distilled, and Stage3 multi-scale variants are tracked as separate stages with
-                explicit metadata, which makes result interpretation much less fragile than raw loss comparison.
-              </p>
-              <p class="track-script">
-                Entrypoint:
-                <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/src/main_train.py">
-                  <code>src/main_train.py</code>
-                </a>
-              </p>
-            </article>
-          </div>
-        </section>
-
-        <section class="section" id="evidence" data-reveal>
-          <div class="section-heading">
-            <p class="eyebrow">Current Evidence</p>
-            <h2>What the results support today</h2>
-          </div>
-          <div class="evidence-grid">
-            <article class="chart-card">
-              <div class="chart-head">
-                <div>
-                  <h3>Track 1 endpoint gap remains severe</h3>
-                  <p>Reference vs reconstructed <code>mAP3D(mod)</code> pairs from the current no-quant summary.</p>
+            <div class="method-copy">
+              <article class="track-card">
+                <div class="track-header">
+                  <span class="track-tag">Track 1</span>
+                  <h3>Point cloud → range image → point cloud → PointPillars</h3>
                 </div>
-                <span class="source-badge">Paired endpoint metric</span>
-              </div>
-              <svg id="track1-chart" class="chart-svg" viewBox="0 0 760 430" role="img" aria-label="Track 1 endpoint comparison chart"></svg>
-              <div class="chart-table-wrap">
-                <table class="chart-data-table">
-                  <caption>Current Track 1 paired endpoint values</caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">Setting</th>
-                      <th scope="col">Reference mAP3D(mod)</th>
-                      <th scope="col">Reconstructed mAP3D(mod)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr><th scope="row">Baseline A</th><td>51.57</td><td>0.00</td></tr>
-                    <tr><th scope="row">Enhanced</th><td>54.39</td><td>0.00</td></tr>
-                    <tr><th scope="row">Geo RF</th><td>53.84</td><td>0.02</td></tr>
-                    <tr><th scope="row">Geo FR</th><td>54.43</td><td>0.15</td></tr>
-                    <tr><th scope="row">Impl A</th><td>54.67</td><td>0.81</td></tr>
-                    <tr><th scope="row">Impl B</th><td>53.57</td><td>0.02</td></tr>
-                    <tr><th scope="row">Pillar A</th><td>54.77</td><td>0.02</td></tr>
-                    <tr><th scope="row">Pillar B</th><td>52.74</td><td>2.19</td></tr>
-                  </tbody>
-                </table>
-              </div>
-              <p class="chart-note">
-                The strongest completed reconstructed run in the current snapshot is still far from its paired reference,
-                which points to the reconstruction path as the bottleneck rather than detector instability.
-              </p>
-            </article>
+                <p>
+                  This track measures whether reconstruction quality survives a full point-cloud export and a detector
+                  endpoint. It is the harshest test of geometry preservation.
+                </p>
+              </article>
 
-            <article class="chart-card">
-              <div class="chart-head">
-                <div>
-                  <h3>Track 2 raw/basic baseline is no longer the problem</h3>
-                  <p><code>AP3D@0.5</code> from raw/basic versus reconstructed settings.</p>
+              <article class="track-card">
+                <div class="track-header">
+                  <span class="track-tag">Track 2</span>
+                  <h3>Point cloud → range image → RangeDet</h3>
                 </div>
-                <span class="source-badge">RangeDet archive summary</span>
-              </div>
-              <svg id="track2-chart" class="chart-svg" viewBox="0 0 760 340" role="img" aria-label="Track 2 AP chart"></svg>
-              <div class="chart-table-wrap">
-                <table class="chart-data-table">
-                  <caption>Current Track 2 AP3D@0.5 values</caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">Setting</th>
-                      <th scope="col">AP3D@0.5</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr><th scope="row">Raw/basic</th><td>0.4979</td></tr>
-                    <tr><th scope="row">Stage0 baseline</th><td>0.0028</td></tr>
-                    <tr><th scope="row">Stage0 enhanced</th><td>0.0010</td></tr>
-                    <tr><th scope="row">Stage1 baseline</th><td>0.0007</td></tr>
-                    <tr><th scope="row">Stage1 enhanced</th><td>0.0003</td></tr>
-                  </tbody>
-                </table>
-              </div>
-              <p class="chart-note">
-                The repaired raw/basic line is strong enough to act as a real reference. Collapse now appears in the
-                codec path, not in the detector baseline.
-              </p>
-            </article>
+                <p>
+                  This track removes the project-unproject loop and asks whether the range-image detector can still
+                  operate once the codec output enters the pipeline directly.
+                </p>
+              </article>
 
-            <article class="chart-card chart-card-wide">
-              <div class="chart-head">
-                <div>
-                  <h3>Oracle ROI suggests the quantizer still has upside</h3>
-                  <p>Pilot-scale bitrate comparison for native versus oracle-driven importance control.</p>
+              <article class="track-card">
+                <div class="track-header">
+                  <span class="track-tag">Current status</span>
+                  <h3>The page emphasizes bottlenecks, not overclaimed wins</h3>
                 </div>
-                <span class="source-badge">16-frame pilot</span>
-              </div>
-              <svg id="oracle-chart" class="chart-svg" viewBox="0 0 760 280" role="img" aria-label="Oracle ROI bitrate comparison chart"></svg>
-              <div class="chart-table-wrap">
-                <table class="chart-data-table">
-                  <caption>Pilot-scale ROI entropy proxy comparison</caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">Setting</th>
-                      <th scope="col">Relative entropy proxy</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr><th scope="row">Stage1 native</th><td>0.8064</td></tr>
-                    <tr><th scope="row">Stage1 oracle ROI</th><td>0.4177</td></tr>
-                    <tr><th scope="row">Stage2 native</th><td>0.8687</td></tr>
-                    <tr><th scope="row">Stage2 oracle ROI</th><td>0.4492</td></tr>
-                  </tbody>
-                </table>
-              </div>
-              <p class="chart-note">
-                In pilot comparisons, forcing an oracle ROI mask roughly halves entropy while keeping ROI distortion
-                nearly unchanged. That is evidence for a calibration bottleneck, not proof that adaptive quantization is useless.
-              </p>
-            </article>
-          </div>
-        </section>
-
-        <section class="section" id="failure-analysis" data-reveal>
-          <div class="section-heading">
-            <p class="eyebrow">Failure Analysis</p>
-            <h2>Three bottlenecks dominate the current story</h2>
-          </div>
-          <div class="risk-grid">
-            <article class="risk-card">
-              <span class="risk-index">01</span>
-              <h3>Importance calibration instability</h3>
-              <p>
-                Earlier runs showed empty ROI predictions at a fixed threshold of <code>0.50</code>, while lower thresholds
-                could recover recall only by introducing very large false-positive regions.
-              </p>
-            </article>
-            <article class="risk-card">
-              <span class="risk-index">02</span>
-              <h3>Projection-path sparsification before codec comparison</h3>
-              <p>
-                Detector collapse is not explained by under-training alone. A raw vs identity vs reconstructed diagnostic
-                found mean point retention of only <code>0.4169</code> after projection and unprojection.
-              </p>
-            </article>
-            <article class="risk-card">
-              <span class="risk-index">03</span>
-              <h3>Range-image artifact modes are now concrete</h3>
-              <p>
-                The latest Track 2 root-cause cycle points to valid-mask corruption, row-wise banding, and detector-agnostic
-                training objectives as the most credible RI-native failure modes.
-              </p>
-            </article>
-          </div>
-        </section>
-
-        <section class="section" data-reveal>
-          <div class="section-heading">
-            <p class="eyebrow">Visual Evidence</p>
-            <h2>Existing notebook outputs already provide real figure-grade evidence</h2>
-          </div>
-          <div class="gallery-grid">
-            <div class="gallery-subhead">
-              <h3>Track 1: geometry and detector endpoint views</h3>
-              <p>Extracted directly from notebook outputs already stored in the repository.</p>
+                <p>
+                  The strongest story today is diagnostic: raw/basic detector behavior is repaired, while codec-driven
+                  artifact patterns remain visible and measurable.
+                </p>
+              </article>
             </div>
+          </div>
+        </section>
+
+        <section class="section result-stage" id="results">
+          <div class="section-heading">
+            <p class="eyebrow">Results</p>
+            <h2>The main message should be visible before anyone reads a paragraph</h2>
+          </div>
+
+          <div class="metric-strip">
+            <article class="metric-pill">
+              <span class="metric-pill-label">Track 1 identity</span>
+              <strong>73.67</strong>
+              <span>mAP3D(mod)</span>
+            </article>
+            <article class="metric-pill">
+              <span class="metric-pill-label">Track 1 reconstructed</span>
+              <strong>2.19</strong>
+              <span>best completed endpoint</span>
+            </article>
+            <article class="metric-pill">
+              <span class="metric-pill-label">Track 2 raw/basic</span>
+              <strong>0.4979</strong>
+              <span>AP3D@0.5 baseline</span>
+            </article>
+            <article class="metric-pill">
+              <span class="metric-pill-label">Projection retention</span>
+              <strong>41.69%</strong>
+              <span>project→unproject mean retention</span>
+            </article>
+          </div>
+
+          <div class="result-showcase">
             <figure class="figure-card figure-card-wide">
               <img
                 src="assets/track1-pointpillar-endpoint-panel-web.png"
-                alt="Track 1 point-pillar endpoint visualization panel comparing raw and reconstructed range-image views."
+                alt="Track 1 PointPillars endpoint visualization."
                 width="1800"
                 height="559"
                 loading="lazy"
                 decoding="async"
               />
               <figcaption>
-                Track 1 endpoint visualization from the executed notebook. This is the clearest single figure for
-                showing that reconstruction quality is a detector-facing issue, not just a training-loss artifact.
+                <strong>Track 1:</strong> detector-facing endpoint collapse remains severe after reconstruction, even
+                when the identity-domain detector result is strong. This is the clearest evidence that the codec path
+                is still not preserving the information the detector actually needs.
               </figcaption>
             </figure>
+
             <figure class="figure-card">
               <img
-                src="assets/track1-identity-bev-panel-web.png"
-                alt="Identity-domain BEV panel from the Track 1 visualization notebook."
-                width="1600"
-                height="1004"
+                src="assets/track2-rangedet-zoom-panel-web.png"
+                alt="Track 2 zoomed detector comparison between raw and reconstructed range images."
+                width="1800"
+                height="755"
                 loading="lazy"
                 decoding="async"
               />
               <figcaption>
-                Identity-domain BEV panel used as a cleaner reference view before codec distortion is introduced.
+                <strong>Track 2:</strong> the failure is not abstract. Reconstructed range images produce visible mask
+                corruption, banding, and box-layout drift in detector-critical regions.
               </figcaption>
             </figure>
+
             <figure class="figure-card">
-              <img
-                src="assets/track1-codec-bev-panel-web.png"
-                alt="Codec-domain BEV panel from the Track 1 visualization notebook."
-                width="1600"
-                height="1004"
-                loading="lazy"
-                decoding="async"
-              />
-              <figcaption>
-                Codec BEV panel pulled from the same notebook path, useful as a directly comparable qualitative view.
-              </figcaption>
-            </figure>
-            <figure class="figure-card figure-card-wide compact-figure">
               <img
                 src="assets/track1-identity-vs-codec.gif"
-                alt="Animated comparison between identity-domain and codec BEV views for Track 1."
+                alt="Animated comparison between identity-domain and codec bird's-eye-view outputs."
                 width="1600"
                 height="1048"
                 loading="lazy"
                 decoding="async"
               />
               <figcaption>
-                Lightweight motion compare for Track 1. It is not a temporal animation, but it does give a cleaner
-                presentation-oriented toggle between the identity and codec BEV views.
-              </figcaption>
-            </figure>
-            <div class="gallery-subhead">
-              <h3>Track 2: codec-artifact diagnostics</h3>
-              <p>Combined from HPC-generated PNG exports and existing in-repo analysis notebooks.</p>
-            </div>
-            <figure class="figure-card figure-card-wide">
-              <img
-                src="assets/track2-rangedet-analysis-preview-web.png"
-                alt="RangeDet analysis preview comparing raw/basic and reconstructed range-image diagnostics."
-                width="1800"
-                height="750"
-                loading="lazy"
-                decoding="async"
-              />
-              <figcaption>
-                RangeDet diagnostic preview pulled from the HPC run directory. This is the fastest visual explanation
-                of why Track 2 is now framed as a codec-artifact problem rather than a detector-baseline problem.
-              </figcaption>
-            </figure>
-            <figure class="figure-card">
-              <img
-                src="assets/track2-rangedet-zoom-panel-web.png"
-                alt="Zoomed Track 2 comparison between raw and reconstructed RangeDet views."
-                width="1800"
-                height="755"
-                loading="lazy"
-                decoding="async"
-              />
-              <figcaption>
-                Notebook-derived zoom panel centered on the detector-critical crop. It helps move the Track 2 story
-                from broad preview images to concrete local failure evidence.
-              </figcaption>
-            </figure>
-            <figure class="figure-card">
-              <img
-                src="assets/track2-rootcause-worst-web.png"
-                alt="Worst-case Track 2 root-cause panel from the current artifact analysis."
-                width="1800"
-                height="711"
-                loading="lazy"
-                decoding="async"
-              />
-              <figcaption>
-                Worst-case root-cause panel exported from the March 16 analysis cycle. The page uses it as concrete
-                evidence that valid-mask corruption and banding are not abstract hypotheses.
-              </figcaption>
-            </figure>
-            <figure class="figure-card">
-              <img
-                src="assets/track2-rootcause-cycle.gif"
-                alt="Animated comparison between median and worst Track 2 root-cause panels."
-                width="1800"
-                height="755"
-                loading="lazy"
-                decoding="async"
-              />
-              <figcaption>
-                Lightweight motion compare for Track 2, cycling between a median and worst-case root-cause panel.
-              </figcaption>
-            </figure>
-            <figure class="figure-card figure-card-wide compact-figure">
-              <img
-                src="assets/track2-artifact-profiles-web.png"
-                alt="Artifact profile plot for a representative Track 2 sample."
-                width="1600"
-                height="486"
-                loading="lazy"
-                decoding="async"
-              />
-              <figcaption>
-                Artifact-profile view for a representative frame. This is the kind of quantitative visual that supports
-                the transition from anecdotal failure inspection to repeatable codec diagnostics.
+                <strong>Qualitative compare:</strong> even without quoting metrics, the codec-side structural shift is
+                already visible in bird's-eye views and aligns with the endpoint degradation.
               </figcaption>
             </figure>
           </div>
         </section>
 
-        <section class="section" data-reveal>
+        <section class="section takeaway-stage" id="takeaways">
           <div class="section-heading">
-            <p class="eyebrow">Current Direction</p>
-            <h2>What the latest notebook and journal entries say to try next</h2>
+            <p class="eyebrow">Takeaways</p>
+            <h2>Three points worth remembering after one pass</h2>
           </div>
-          <div class="timeline-card">
-            <div class="timeline-item">
-              <span class="timeline-label">Pilot A</span>
-              <div>
-                <h3>Mask-aware codec</h3>
-                <p>Prioritize occupancy and valid-mask fidelity instead of treating mask corruption as a side effect.</p>
-              </div>
-            </div>
-            <div class="timeline-item">
-              <span class="timeline-label">Pilot B</span>
-              <div>
-                <h3>Anti-banding skip decoder</h3>
-                <p>Attack the row-wise banding signature that now appears repeatedly in Track 2 artifact summaries.</p>
-              </div>
-            </div>
-            <div class="timeline-item">
-              <span class="timeline-label">Pilot C</span>
-              <div>
-                <h3>Detector-aware auxiliary target</h3>
-                <p>Feed repaired raw/basic RangeDet teacher maps back into the codec training path.</p>
-              </div>
-            </div>
-            <div class="timeline-item">
-              <span class="timeline-label">Pilot D</span>
-              <div>
-                <h3>Combined recovery branch</h3>
-                <p>Merge skip decoding, mask-aware losses, and anti-banding ideas before running a final compare step.</p>
-              </div>
-            </div>
-          </div>
-        </section>
 
-        <section class="section" id="reproducibility" data-reveal>
-          <div class="section-heading">
-            <p class="eyebrow">Reproducibility</p>
-            <h2>Code-linked entry points and public research artifacts</h2>
-          </div>
-          <div class="repro-grid">
-            <article class="repro-card">
-              <h3>Core model and training</h3>
-              <ul class="link-list">
-                <li><a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/src/main_train.py"><code>src/main_train.py</code></a></li>
-                <li><a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/src/models/compression.py"><code>src/models/compression.py</code></a></li>
-                <li><a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/docs/notes/research_progress.md"><code>docs/notes/research_progress.md</code></a></li>
-              </ul>
+          <div class="takeaway-grid">
+            <article class="risk-card">
+              <span class="risk-index">01</span>
+              <h3>The detector baseline is no longer the excuse</h3>
+              <p>
+                Track 2 raw/basic behavior is now strong enough that failure can be attributed to the codec path with
+                much more confidence than before.
+              </p>
             </article>
-            <article class="repro-card">
-              <h3>Track 1 and Track 2 evaluation chains</h3>
-              <ul class="link-list">
-                <li><a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/src/scripts/run_track1_noquant_chain.sh"><code>run_track1_noquant_chain.sh</code></a></li>
-                <li><a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/src/scripts/run_rangedet_stage_eval.sh"><code>run_rangedet_stage_eval.sh</code></a></li>
-                <li><a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/docs/report/paper_fair_comparison_table.md"><code>paper_fair_comparison_table.md</code></a></li>
-              </ul>
+            <article class="risk-card">
+              <span class="risk-index">02</span>
+              <h3>Projection itself already throws information away</h3>
+              <p>
+                The current workflow is fighting two problems at once: project-unproject sparsification and
+                reconstruction artifacts introduced by the codec.
+              </p>
             </article>
-            <article class="repro-card">
-              <h3>Notebook-backed diagnostics</h3>
-              <ul class="link-list">
-                <li><a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/notebooks/track1_identity_vs_codec_visualization.ipynb"><code>track1_identity_vs_codec_visualization.ipynb</code></a></li>
-                <li><a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/notebooks/rangedet_analysis.executed.ipynb"><code>rangedet_analysis.executed.ipynb</code></a></li>
-                <li><a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/notebooks/track2_codec_root_cause.executed.ipynb"><code>track2_codec_root_cause.executed.ipynb</code></a></li>
-                <li><a href="gallery.html"><code>docs/gallery.html</code></a></li>
-              </ul>
+            <article class="risk-card">
+              <span class="risk-index">03</span>
+              <h3>The next useful work is targeted, not broad</h3>
+              <p>
+                Mask fidelity, anti-banding recovery, and detector-aware auxiliary targets are more important right now
+                than trying to oversell a final result.
+              </p>
             </article>
           </div>
         </section>
 
-        <section class="section callout-section" data-reveal>
+        <section class="section appendix-stage">
           <div class="callout-card">
             <div>
-              <p class="eyebrow">Paper-grade next step</p>
-              <h2>What would most improve this page next</h2>
+              <p class="eyebrow">Appendix</p>
+              <h2>Supporting figures and audit-style notes still exist, but they are not the main story.</h2>
               <p>
-                The current page is strong on architecture, metrics, and failure analysis. The remaining gap is mostly
-                high-quality exported visuals: Track 1 qualitative panels, Track 2 artifact montages, and short GIFs
-                showing the difference between raw, identity, and reconstructed outputs.
+                The gallery is where notebook-like diagnostics belong. The claims page is a conservative evidence map,
+                useful for thesis or committee review, not for first-glance project presentation.
               </p>
             </div>
             <div class="callout-actions">
-              <a class="button button-primary" href="gallery.html">Open the full gallery</a>
-              <a class="button button-secondary" href="asset-gaps.html">Open the detailed figure wishlist</a>
+              <a class="button button-primary" href="gallery.html">Open Gallery</a>
+              <a class="button button-secondary" href="evidence.html">Open Evidence Notes</a>
             </div>
           </div>
         </section>
@@ -562,15 +297,11 @@
 
       <footer class="site-footer">
         <p>
-          Built as an in-repo GitHub Pages site for
+          Built for
           <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression">Shawn-Kim96/lidar_pointcloud_compression</a>.
         </p>
-        <p>
-          Current site framing: honest progress report, not final detector-preserving compression claim.
-        </p>
+        <p>Current framing: project page first, appendix second.</p>
       </footer>
     </div>
-
-    <script src="main.js"></script>
   </body>
 </html>
