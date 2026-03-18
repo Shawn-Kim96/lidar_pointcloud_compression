@@ -6,13 +6,13 @@
     <title>LiDAR Point Cloud Compression</title>
     <meta
       name="description"
-      content="Research project page for detector-facing LiDAR compression, focused on what currently works, what fails, and why."
+      content="Ongoing thesis project page for detector-facing LiDAR compression, focused on why it matters, how it was engineered, and what the current results show."
     />
     <meta name="theme-color" content="#0f766e" />
     <meta property="og:title" content="LiDAR Point Cloud Compression" />
     <meta
       property="og:description"
-      content="Detector-facing LiDAR compression with dual downstream evaluation and explicit failure analysis."
+      content="Ongoing thesis project on detector-facing LiDAR compression with dual downstream evaluation."
     />
     <meta property="og:type" content="website" />
     <meta property="og:image" content="assets/track2-rangedet-zoom-panel-web.png" />
@@ -30,10 +30,10 @@
           </span>
         </a>
         <nav class="site-nav" aria-label="Primary">
-          <a href="#method">Method</a>
+          <a href="#why">Why</a>
+          <a href="#method">Engineering</a>
           <a href="#results">Results</a>
-          <a href="#takeaways">Takeaways</a>
-          <a href="gallery.html">Gallery</a>
+          <a href="#status">Current Status</a>
           <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression">Code</a>
         </nav>
       </header>
@@ -41,20 +41,22 @@
       <main>
         <section class="section landing-hero" id="top">
           <div class="landing-copy">
-            <p class="eyebrow">Research In Progress</p>
+            <p class="eyebrow">Ongoing Thesis Project</p>
             <h1>Detector-facing LiDAR compression, judged by what survives downstream.</h1>
             <p class="landing-lede">
-              This project asks a simple question: if a LiDAR codec preserves pixel-level appearance but breaks the
-              detector, what exactly failed? The repository builds a learned range-image compression pipeline, evaluates
-              it in two downstream tracks, and uses qualitative diagnostics to localize the real bottlenecks.
+              This thesis project asks a simple question: if a LiDAR codec looks reasonable in isolation but breaks a
+              downstream detector, what actually failed? The work builds a learned range-image compression pipeline,
+              evaluates it in two downstream tracks, and uses qualitative diagnostics to separate detector problems from
+              codec problems.
             </p>
             <div class="hero-actions">
               <a class="button button-primary" href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression">View Code</a>
-              <a class="button button-secondary" href="gallery.html">View Figures</a>
-              <a class="button button-secondary" href="asset-gaps.html">What Is Still Missing</a>
+              <a class="button button-secondary" href="#results">See Results</a>
+              <a class="button button-secondary" href="#method">How It Was Engineered</a>
             </div>
             <ul class="landing-badges">
-              <li>Latest public framing: March 17, 2026</li>
+              <li>Research in progress as of March 17, 2026</li>
+              <li>Thesis-focused engineering project</li>
               <li>Track 1: PointPillars endpoint</li>
               <li>Track 2: RangeDet endpoint</li>
             </ul>
@@ -76,31 +78,31 @@
           </figure>
         </section>
 
-        <section class="section quick-summary">
+        <section class="section quick-summary" id="why">
           <div class="section-heading">
-            <p class="eyebrow">Abstract</p>
-            <h2>What the project is really about</h2>
+            <p class="eyebrow">Why This Project</p>
+            <h2>What, why, and where it stands today</h2>
           </div>
           <div class="summary-grid">
             <article class="summary-card">
-              <span class="summary-label">Question</span>
+              <span class="summary-label">What</span>
               <p>
-                Can a LiDAR codec allocate rate by downstream detection relevance instead of treating every region of
-                the range image equally?
+                A detector-facing LiDAR compression pipeline that tries to preserve the information a downstream 3D
+                detector actually needs, not just low-level reconstruction appearance.
               </p>
             </article>
             <article class="summary-card">
-              <span class="summary-label">Current answer</span>
+              <span class="summary-label">Why</span>
               <p>
-                The detector baseline is no longer the main blocker. The dominant failure is now in the compression and
-                reconstruction path.
+                Standard compression metrics can miss the real failure. A codec may look acceptable visually while
+                still breaking the detector that has to consume the output.
               </p>
             </article>
             <article class="summary-card">
-              <span class="summary-label">Why this page exists</span>
+              <span class="summary-label">Current status</span>
               <p>
-                The work is not paper-finished yet, but the pipeline, failure modes, and strongest intermediate
-                findings are already worth showing clearly.
+                This is not a finished paper-result page. The strongest result today is clear bottleneck localization:
+                the repaired detector baseline holds, while the codec path still causes the main downstream failure.
               </p>
             </article>
           </div>
@@ -108,8 +110,8 @@
 
         <section class="section method-stage" id="method">
           <div class="section-heading">
-            <p class="eyebrow">Method</p>
-            <h2>Two downstream tracks are used to separate detector issues from codec issues</h2>
+            <p class="eyebrow">Engineering</p>
+            <h2>How the thesis was engineered to isolate the real bottleneck</h2>
           </div>
 
           <div class="method-layout">
@@ -154,7 +156,7 @@
               <article class="track-card">
                 <div class="track-header">
                   <span class="track-tag">Current status</span>
-                  <h3>The page emphasizes bottlenecks, not overclaimed wins</h3>
+                  <h3>The pipeline is usable enough to diagnose, not finished enough to oversell</h3>
                 </div>
                 <p>
                   The strongest story today is diagnostic: raw/basic detector behavior is repaired, while codec-driven
@@ -168,7 +170,7 @@
         <section class="section result-stage" id="results">
           <div class="section-heading">
             <p class="eyebrow">Results</p>
-            <h2>The main message should be visible before anyone reads a paragraph</h2>
+            <h2>The current result is not a final win. It is a clear diagnosis.</h2>
           </div>
 
           <div class="metric-strip">
@@ -243,10 +245,10 @@
           </div>
         </section>
 
-        <section class="section takeaway-stage" id="takeaways">
+        <section class="section takeaway-stage" id="status">
           <div class="section-heading">
-            <p class="eyebrow">Takeaways</p>
-            <h2>Three points worth remembering after one pass</h2>
+            <p class="eyebrow">Current Status</p>
+            <h2>What a reader should remember after one pass</h2>
           </div>
 
           <div class="takeaway-grid">
@@ -277,30 +279,22 @@
           </div>
         </section>
 
-        <section class="section appendix-stage">
-          <div class="callout-card">
-            <div>
-              <p class="eyebrow">Appendix</p>
-              <h2>Supporting figures and audit-style notes still exist, but they are not the main story.</h2>
-              <p>
-                The gallery is where notebook-like diagnostics belong. The claims page is a conservative evidence map,
-                useful for thesis or committee review, not for first-glance project presentation.
-              </p>
-            </div>
-            <div class="callout-actions">
-              <a class="button button-primary" href="gallery.html">Open Gallery</a>
-              <a class="button button-secondary" href="evidence.html">Open Evidence Notes</a>
-            </div>
-          </div>
-        </section>
       </main>
 
       <footer class="site-footer">
-        <p>
-          Built for
-          <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression">Shawn-Kim96/lidar_pointcloud_compression</a>.
+        <div>
+          <p>
+            Built for
+            <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression">Shawn-Kim96/lidar_pointcloud_compression</a>.
+          </p>
+          <p>Current framing: single-page thesis project introduction.</p>
+        </div>
+        <p class="footer-links">
+          Supporting pages:
+          <a href="gallery.html">Gallery</a>
+          <a href="evidence.html">Evidence</a>
+          <a href="asset-gaps.html">Asset Gaps</a>
         </p>
-        <p>Current framing: project page first, appendix second.</p>
       </footer>
     </div>
   </body>

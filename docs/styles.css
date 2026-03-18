@@ -803,6 +803,22 @@ h3 {
   font-size: 0.92rem;
 }
 
+.site-footer p {
+  margin: 0;
+}
+
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.footer-links a {
+  text-decoration: none;
+  color: var(--muted-strong);
+}
+
 .prose-surface {
   margin-top: 18px;
 }
