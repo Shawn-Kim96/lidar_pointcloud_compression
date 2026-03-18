@@ -7,7 +7,6 @@ import os
 import pickle
 from pathlib import Path
 
-import cv2
 import numpy as np
 
 
@@ -52,22 +51,86 @@ def load_source_roidb(path: Path):
     return recid_to_sample, sample_to_gt
 
 
-def rotated_intersection_area(box1: np.ndarray, box2: np.ndarray) -> float:
-    rect1 = (
-        (float(box1[0]), float(box1[1])),
-        (float(box1[3]), float(box1[4])),
-        float(box1[6] * 180.0 / math.pi),
-    )
-    rect2 = (
-        (float(box2[0]), float(box2[1])),
-        (float(box2[3]), float(box2[4])),
-        float(box2[6] * 180.0 / math.pi),
-    )
-    _, pts = cv2.rotatedRectangleIntersection(rect1, rect2)
-    if pts is None:
+def rectangle_corners_bev(box: np.ndarray) -> np.ndarray:
+    x, y, _, l, w, _, yaw = [float(v) for v in box[:7]]
+    c = math.cos(yaw)
+    s = math.sin(yaw)
+    dx = l * 0.5
+    dy = w * 0.5
+    corners = np.array([[dx, dy], [dx, -dy], [-dx, -dy], [-dx, dy]], dtype=np.float64)
+    rot = np.array([[c, -s], [s, c]], dtype=np.float64)
+    return corners @ rot.T + np.array([x, y], dtype=np.float64)
+
+
+def polygon_area(poly: np.ndarray) -> float:
+    if poly.shape[0] < 3:
         return 0.0
-    hull = cv2.convexHull(pts, returnPoints=True)
-    return float(cv2.contourArea(hull))
+    x = poly[:, 0]
+    y = poly[:, 1]
+    return float(0.5 * abs(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))))
+
+
+def _cross(a: np.ndarray, b: np.ndarray) -> float:
+    return float(a[0] * b[1] - a[1] * b[0])
+
+
+def point_in_convex_polygon(point: np.ndarray, poly: np.ndarray) -> bool:
+    signs = []
+    for i in range(len(poly)):
+        a = poly[i]
+        b = poly[(i + 1) % len(poly)]
+        signs.append(_cross(b - a, point - a))
+    signs = np.asarray(signs)
+    return bool(np.all(signs >= -1e-9) or np.all(signs <= 1e-9))
+
+
+def segment_intersection(p1, p2, q1, q2):
+    r = p2 - p1
+    s = q2 - q1
+    denom = _cross(r, s)
+    if abs(denom) < 1e-12:
+        return None
+    t = _cross(q1 - p1, s) / denom
+    u = _cross(q1 - p1, r) / denom
+    if -1e-9 <= t <= 1 + 1e-9 and -1e-9 <= u <= 1 + 1e-9:
+        return p1 + t * r
+    return None
+
+
+def polygon_intersection(subject: np.ndarray, clip: np.ndarray) -> np.ndarray:
+    pts = []
+    for p in subject:
+        if point_in_convex_polygon(p, clip):
+            pts.append(p)
+    for p in clip:
+        if point_in_convex_polygon(p, subject):
+            pts.append(p)
+    for i in range(len(subject)):
+        p1 = subject[i]
+        p2 = subject[(i + 1) % len(subject)]
+        for j in range(len(clip)):
+            q1 = clip[j]
+            q2 = clip[(j + 1) % len(clip)]
+            inter = segment_intersection(p1, p2, q1, q2)
+            if inter is not None:
+                pts.append(inter)
+    if not pts:
+        return np.zeros((0, 2), dtype=np.float64)
+    pts = np.asarray(pts, dtype=np.float64)
+    rounded = np.round(pts, decimals=8)
+    _, uniq_idx = np.unique(rounded, axis=0, return_index=True)
+    pts = pts[np.sort(uniq_idx)]
+    center = pts.mean(axis=0)
+    angles = np.arctan2(pts[:, 1] - center[1], pts[:, 0] - center[0])
+    order = np.argsort(angles)
+    return pts[order]
+
+
+def rotated_intersection_area(box1: np.ndarray, box2: np.ndarray) -> float:
+    poly1 = rectangle_corners_bev(box1)
+    poly2 = rectangle_corners_bev(box2)
+    inter = polygon_intersection(poly1, poly2)
+    return polygon_area(inter)
 
 
 def box_iou(box1: np.ndarray, box2: np.ndarray, mode: str) -> float:

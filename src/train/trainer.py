@@ -57,6 +57,12 @@ class Trainer:
         self.recon_xyz_weight = float(loss_cfg.get("recon_xyz_weight", 1.0))
         self.recon_remission_weight = float(loss_cfg.get("recon_remission_weight", 1.0))
         self.w_ray_consistency = float(loss_cfg.get("w_ray_consistency", 0.0))
+        self.w_valid_mask = float(loss_cfg.get("w_valid_mask", 0.0))
+        self.w_valid_mask_dice = float(loss_cfg.get("w_valid_mask_dice", 0.0))
+        self.w_range_grad_row = float(loss_cfg.get("w_range_grad_row", 0.0))
+        self.w_range_grad_col = float(loss_cfg.get("w_range_grad_col", 0.0))
+        self.w_row_profile = float(loss_cfg.get("w_row_profile", 0.0))
+        self.w_detector_target = float(loss_cfg.get("w_detector_target", 0.0))
         data_cfg = config.get("data", {})
         self.fov_up_deg = float(data_cfg.get("fov_up_deg", 3.0))
         self.fov_down_deg = float(data_cfg.get("fov_down_deg", -25.0))
@@ -113,7 +119,13 @@ class Trainer:
         self.uniform_bits = int(quantizer_cfg.get("uniform_bits", quantizer_cfg.get("quant_bits", 8)))
         self.roi_levels = float(quantizer_cfg.get("roi_levels", 256.0))
         self.bg_levels = float(quantizer_cfg.get("bg_levels", 16.0))
-        self.pillar_side_enabled = bool(config.get("model", {}).get("pillar_side_config", {}).get("enabled", False))
+        model_cfg = config.get("model", {})
+        pillar_side_cfg = model_cfg.get("pillar_side_config") or {}
+        detector_aux_cfg = model_cfg.get("detector_aux_head_config") or {}
+        mask_head_cfg = model_cfg.get("mask_head_config") or {}
+        self.pillar_side_enabled = bool(pillar_side_cfg.get("enabled", False))
+        self.detector_aux_enabled = bool(detector_aux_cfg.get("enabled", False))
+        self.mask_head_enabled = bool(mask_head_cfg.get("enabled", False))
 
         supervision_cfg = config.get("supervision", {})
         self.supervision_type = supervision_cfg.get("type", "roi")
@@ -237,6 +249,114 @@ class Trainer:
             + self.recon_remission_weight * rem_loss
         )
 
+    def _compute_valid_mask_loss(self, aux, valid_mask):
+        if self.w_valid_mask <= 0.0 or "valid_mask_logits" not in aux:
+            return torch.tensor(0.0, device=self.device)
+        logits = aux["valid_mask_logits"]
+        target = valid_mask
+        if target is None:
+            target = torch.ones(
+                (logits.shape[0], 1, logits.shape[-2], logits.shape[-1]),
+                device=logits.device,
+                dtype=logits.dtype,
+            )
+        elif target.dim() == 3:
+            target = target.unsqueeze(1)
+        if target.shape[-2:] != logits.shape[-2:]:
+            target = F.interpolate(target.float(), size=logits.shape[-2:], mode="nearest")
+        target = target.float()
+        return F.binary_cross_entropy_with_logits(logits, target)
+
+    def _compute_valid_mask_dice_loss(self, aux, valid_mask):
+        if self.w_valid_mask_dice <= 0.0 or "valid_mask_logits" not in aux:
+            return torch.tensor(0.0, device=self.device)
+        logits = aux["valid_mask_logits"]
+        target = valid_mask
+        if target is None:
+            target = torch.ones(
+                (logits.shape[0], 1, logits.shape[-2], logits.shape[-1]),
+                device=logits.device,
+                dtype=logits.dtype,
+            )
+        elif target.dim() == 3:
+            target = target.unsqueeze(1)
+        if target.shape[-2:] != logits.shape[-2:]:
+            target = F.interpolate(target.float(), size=logits.shape[-2:], mode="nearest")
+        target = target.float()
+        pred = torch.sigmoid(logits)
+        inter = (pred * target).sum(dim=(1, 2, 3))
+        denom = pred.sum(dim=(1, 2, 3)) + target.sum(dim=(1, 2, 3))
+        dice = (2.0 * inter + 1e-6) / (denom + 1e-6)
+        return 1.0 - dice.mean()
+
+    @staticmethod
+    def _pairwise_mask(valid_mask, axis: str):
+        if axis == "row":
+            return valid_mask[:, :, 1:, :] * valid_mask[:, :, :-1, :]
+        if axis == "col":
+            return valid_mask[:, :, :, 1:] * valid_mask[:, :, :, :-1]
+        raise ValueError(f"Unknown axis '{axis}'")
+
+    def _compute_range_gradient_loss(self, recon, data, valid_mask, axis: str):
+        weight = self.w_range_grad_row if axis == "row" else self.w_range_grad_col
+        if weight <= 0.0:
+            return torch.tensor(0.0, device=self.device)
+        if valid_mask is None:
+            valid_mask = torch.ones(
+                (data.shape[0], 1, data.shape[-2], data.shape[-1]),
+                device=data.device,
+                dtype=data.dtype,
+            )
+        elif valid_mask.dim() == 3:
+            valid_mask = valid_mask.unsqueeze(1)
+        valid_mask = valid_mask.float()
+        if axis == "row":
+            recon_grad = recon[:, 0:1, 1:, :] - recon[:, 0:1, :-1, :]
+            data_grad = data[:, 0:1, 1:, :] - data[:, 0:1, :-1, :]
+        else:
+            recon_grad = recon[:, 0:1, :, 1:] - recon[:, 0:1, :, :-1]
+            data_grad = data[:, 0:1, :, 1:] - data[:, 0:1, :, :-1]
+        pair_mask = self._pairwise_mask(valid_mask, axis=axis)
+        denom = pair_mask.sum().clamp(min=1.0)
+        return (((recon_grad - data_grad) ** 2) * pair_mask).sum() / denom
+
+    def _compute_row_profile_loss(self, recon, data, valid_mask):
+        if self.w_row_profile <= 0.0:
+            return torch.tensor(0.0, device=self.device)
+        if valid_mask is None:
+            valid_mask = torch.ones(
+                (data.shape[0], 1, data.shape[-2], data.shape[-1]),
+                device=data.device,
+                dtype=data.dtype,
+            )
+        elif valid_mask.dim() == 3:
+            valid_mask = valid_mask.unsqueeze(1)
+        valid_mask = valid_mask.float()
+        row_mass = valid_mask.sum(dim=-1).clamp(min=1.0)
+        recon_profile = (recon[:, 0:1] * valid_mask).sum(dim=-1) / row_mass
+        data_profile = (data[:, 0:1] * valid_mask).sum(dim=-1) / row_mass
+        return F.mse_loss(recon_profile, data_profile)
+
+    def _compute_detector_target_loss(self, aux, teacher_target, valid_mask):
+        if self.w_detector_target <= 0.0 or "detector_aux_logits" not in aux or teacher_target is None:
+            return torch.tensor(0.0, device=self.device)
+        logits = aux["detector_aux_logits"]
+        if teacher_target.dim() == 3:
+            teacher_target = teacher_target.unsqueeze(1)
+        if teacher_target.shape[-2:] != logits.shape[-2:]:
+            teacher_target = F.interpolate(teacher_target.float(), size=logits.shape[-2:], mode="bilinear", align_corners=False)
+        teacher_target = teacher_target.float().clamp(min=0.0, max=1.0)
+        if valid_mask is None:
+            weight = torch.ones_like(teacher_target)
+        else:
+            if valid_mask.dim() == 3:
+                valid_mask = valid_mask.unsqueeze(1)
+            if valid_mask.shape[-2:] != logits.shape[-2:]:
+                valid_mask = F.interpolate(valid_mask.float(), size=logits.shape[-2:], mode="nearest")
+            weight = valid_mask.float()
+        bce = F.binary_cross_entropy_with_logits(logits, teacher_target, reduction="none")
+        return (bce * weight).sum() / weight.sum().clamp(min=1.0)
+
     def _get_ray_grid(self, height: int, width: int, device, dtype):
         key = (height, width, str(device), str(dtype), round(self.fov_up_deg, 4), round(self.fov_down_deg, 4))
         if key not in self._ray_grid_cache:
@@ -318,6 +438,11 @@ class Trainer:
         total_eq_bits = 0.0
         total_code_entropy = 0.0
         total_imp_mean = 0.0
+        total_valid_mask_loss = 0.0
+        total_grad_row_loss = 0.0
+        total_grad_col_loss = 0.0
+        total_row_profile_loss = 0.0
+        total_detector_target_loss = 0.0
         stat_count = 0
         
         pbar = tqdm(self.train_loader, desc=f"Epoch {epoch}")
@@ -346,15 +471,22 @@ class Trainer:
             # Pass GT ROI mask if available and using 'roi' supervision
             # This logic mimics train_stage2_1.py
             roi_mask = None
+            batch_idx = 2
             if len(batch) >= 3 and self.supervision_type == "roi":
-                 roi_mask = batch[2].to(self.device)
+                 roi_mask = batch[batch_idx].to(self.device)
+                 batch_idx += 1
             raw_points = None
             raw_point_counts = None
             if self.pillar_side_enabled:
-                if len(batch) < 5:
+                if len(batch) < batch_idx + 2:
                     raise ValueError("pillar_side training expects raw point tensors in the batch.")
-                raw_points = batch[3].to(self.device)
-                raw_point_counts = batch[4].view(-1).to(self.device)
+                raw_points = batch[batch_idx].to(self.device)
+                raw_point_counts = batch[batch_idx + 1].view(-1).to(self.device)
+                batch_idx += 2
+            teacher_target = None
+            if self.detector_aux_enabled and len(batch) > batch_idx and torch.is_tensor(batch[batch_idx]):
+                teacher_target = batch[batch_idx].to(self.device)
+                batch_idx += 1
 
             # Forward
             recon, aux = self.model(
@@ -395,6 +527,12 @@ class Trainer:
 
             loss_rate = self._compute_rate_loss(aux, roi_target)
             loss_ray = self._compute_ray_consistency_loss(recon, valid_mask)
+            loss_valid_mask = self._compute_valid_mask_loss(aux, valid_mask)
+            loss_valid_mask_dice = self._compute_valid_mask_dice_loss(aux, valid_mask)
+            loss_grad_row = self._compute_range_gradient_loss(recon, data, valid_mask, axis="row")
+            loss_grad_col = self._compute_range_gradient_loss(recon, data, valid_mask, axis="col")
+            loss_row_profile = self._compute_row_profile_loss(recon, data, valid_mask)
+            loss_detector_target = self._compute_detector_target_loss(aux, teacher_target, valid_mask)
 
             if self.teacher and self.w_distill > 0.0:
                 student_features = None
@@ -449,7 +587,13 @@ class Trainer:
                 self.w_rate * loss_rate +
                 self.w_importance * loss_imp +
                 self.w_imp_separation * loss_imp_sep +
-                self.w_ray_consistency * loss_ray
+                self.w_ray_consistency * loss_ray +
+                self.w_valid_mask * loss_valid_mask +
+                self.w_valid_mask_dice * loss_valid_mask_dice +
+                self.w_range_grad_row * loss_grad_row +
+                self.w_range_grad_col * loss_grad_col +
+                self.w_row_profile * loss_row_profile +
+                self.w_detector_target * loss_detector_target
             )
             
             self.optimizer.zero_grad()
@@ -466,6 +610,11 @@ class Trainer:
                 total_imp_mean += float(imp_map_pred.detach().mean().item())
             else:
                 total_imp_mean += float("nan")
+            total_valid_mask_loss += float(loss_valid_mask.detach().item() + loss_valid_mask_dice.detach().item())
+            total_grad_row_loss += float(loss_grad_row.detach().item())
+            total_grad_col_loss += float(loss_grad_col.detach().item())
+            total_row_profile_loss += float(loss_row_profile.detach().item())
+            total_detector_target_loss += float(loss_detector_target.detach().item())
             stat_count += 1
             pbar.set_postfix(loss=total_loss.item())
 
@@ -476,6 +625,11 @@ class Trainer:
             "eq_bits": total_eq_bits / denom,
             "code_entropy": total_code_entropy / denom,
             "imp_mean": total_imp_mean / denom,
+            "valid_mask_loss": total_valid_mask_loss / denom,
+            "grad_row_loss": total_grad_row_loss / denom,
+            "grad_col_loss": total_grad_col_loss / denom,
+            "row_profile_loss": total_row_profile_loss / denom,
+            "detector_target_loss": total_detector_target_loss / denom,
         }
 
     def run(self, epochs, save_dir):
@@ -493,7 +647,12 @@ class Trainer:
                 f"| rate_proxy={train_stats['rate_proxy']:.4f} "
                 f"| eq_bits={train_stats['eq_bits']:.4f} "
                 f"| code_entropy={train_stats['code_entropy']:.4f} "
-                f"| imp_mean={train_stats['imp_mean']:.4f}"
+                f"| imp_mean={train_stats['imp_mean']:.4f} "
+                f"| valid_mask={train_stats['valid_mask_loss']:.4f} "
+                f"| grad_row={train_stats['grad_row_loss']:.4f} "
+                f"| grad_col={train_stats['grad_col_loss']:.4f} "
+                f"| row_profile={train_stats['row_profile_loss']:.4f} "
+                f"| det_target={train_stats['detector_target_loss']:.4f}"
             )
             
             if (epoch + 1) % 5 == 0:

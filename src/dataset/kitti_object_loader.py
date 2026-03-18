@@ -65,6 +65,8 @@ class KittiObjectRangeDataset(Dataset):
         roi_classes: Optional[Sequence[str]] = None,
         return_raw_points: bool = False,
         max_raw_points: int = 150000,
+        teacher_target_root: Optional[str] = None,
+        return_sample_id: bool = False,
     ):
         self.root_dir = Path(root_dir)
         self.split = split
@@ -72,6 +74,8 @@ class KittiObjectRangeDataset(Dataset):
         self.return_roi_mask = return_roi_mask
         self.return_raw_points = bool(return_raw_points)
         self.max_raw_points = int(max_raw_points)
+        self.teacher_target_root = Path(teacher_target_root) if teacher_target_root else None
+        self.return_sample_id = bool(return_sample_id)
         self.roi_classes = set(roi_classes) if roi_classes else set(DEFAULT_ROI_CLASSES)
 
         self.training_dir = self.root_dir / "training"
@@ -108,6 +112,27 @@ class KittiObjectRangeDataset(Dataset):
         self._label_cache: Dict[str, List[List[str]]] = {}
 
         print(f"Loaded {len(self.sample_ids)} KITTI frames from split={split} at {self.root_dir}")
+
+    def _load_teacher_target(self, sample_id: str) -> np.ndarray:
+        if self.teacher_target_root is None:
+            raise RuntimeError("teacher_target_root is not configured.")
+
+        npy_path = self.teacher_target_root / f"{sample_id}.npy"
+        npz_path = self.teacher_target_root / f"{sample_id}.npz"
+        if npy_path.exists():
+            arr = np.load(str(npy_path))
+        elif npz_path.exists():
+            payload = np.load(str(npz_path))
+            arr = payload["target"] if "target" in payload else payload[list(payload.keys())[0]]
+        else:
+            arr = np.zeros((self.H, self.W), dtype=np.float32)
+
+        arr = np.asarray(arr, dtype=np.float32)
+        if arr.shape != (self.H, self.W):
+            raise ValueError(
+                f"Teacher target shape mismatch for {sample_id}: got {arr.shape}, expected {(self.H, self.W)}"
+            )
+        return arr
 
     def __len__(self) -> int:
         return len(self.sample_ids)
@@ -280,4 +305,9 @@ class KittiObjectRangeDataset(Dataset):
             padded[: raw_points.shape[0]] = raw_points[:, :4]
             outputs.append(torch.from_numpy(padded))
             outputs.append(torch.tensor([raw_points.shape[0]], dtype=torch.long))
+        if self.teacher_target_root is not None:
+            teacher_target = self._load_teacher_target(sample_id)
+            outputs.append(torch.from_numpy(teacher_target).unsqueeze(0))
+        if self.return_sample_id:
+            outputs.append(sample_id)
         return tuple(outputs)

@@ -31,6 +31,8 @@ class LidarCompressionModel(nn.Module):
         feature_fusion_config=None,
         position_branch_config=None,
         pillar_side_config=None,
+        mask_head_config=None,
+        detector_aux_head_config=None,
     ):
         super().__init__()
         
@@ -240,6 +242,37 @@ class LidarCompressionModel(nn.Module):
         self.register_buffer("_coord_cache", torch.empty(0), persistent=False)
         self._coord_cache_key = None
 
+        # Optional heads operating on the reconstructed RI.
+        self.valid_mask_head = None
+        self.valid_mask_gate_threshold = 0.5
+        self.valid_mask_gate_on_export = False
+        if mask_head_config is not None and mask_head_config.get("enabled", False):
+            hidden = int(mask_head_config.get("hidden_channels", max(16, self.latent_channels // 2)))
+            self.valid_mask_head = nn.Sequential(
+                nn.Conv2d(decoder_config.get("out_channels", 5), hidden, kernel_size=3, padding=1, bias=False),
+                _norm(mask_head_config.get("norm", "batch"), hidden),
+                _activation(mask_head_config.get("activation", "relu")),
+                nn.Conv2d(hidden, hidden, kernel_size=3, padding=1, bias=False),
+                _norm(mask_head_config.get("norm", "batch"), hidden),
+                _activation(mask_head_config.get("activation", "relu")),
+                nn.Conv2d(hidden, 1, kernel_size=1),
+            )
+            self.valid_mask_gate_threshold = float(mask_head_config.get("gate_threshold", 0.5))
+            self.valid_mask_gate_on_export = bool(mask_head_config.get("gate_on_export", True))
+
+        self.detector_aux_head = None
+        if detector_aux_head_config is not None and detector_aux_head_config.get("enabled", False):
+            hidden = int(detector_aux_head_config.get("hidden_channels", max(16, self.latent_channels // 2)))
+            self.detector_aux_head = nn.Sequential(
+                nn.Conv2d(decoder_config.get("out_channels", 5), hidden, kernel_size=3, padding=1, bias=False),
+                _norm(detector_aux_head_config.get("norm", "batch"), hidden),
+                _activation(detector_aux_head_config.get("activation", "relu")),
+                nn.Conv2d(hidden, hidden, kernel_size=3, padding=1, bias=False),
+                _norm(detector_aux_head_config.get("norm", "batch"), hidden),
+                _activation(detector_aux_head_config.get("activation", "relu")),
+                nn.Conv2d(hidden, 1, kernel_size=1),
+            )
+
     def _build_coord_features(self, batch_size: int, height: int, width: int, device, dtype):
         key = (height, width, str(device), str(dtype), round(self.fov_up_deg, 4), round(self.fov_down_deg, 4), self.coord_channels)
         if self._coord_cache_key != key or self._coord_cache.numel() == 0:
@@ -428,6 +461,16 @@ class LidarCompressionModel(nn.Module):
             recon = self.decoder(latent_deq, skip_features=stage_features)
         else:
             recon = self.decoder(latent_deq)
+        if self.valid_mask_head is not None:
+            valid_mask_logits = self.valid_mask_head(recon)
+            aux["valid_mask_logits"] = valid_mask_logits
+            aux["pred_valid_mask"] = torch.sigmoid(valid_mask_logits)
+            aux["valid_mask_gate_threshold"] = self.valid_mask_gate_threshold
+            aux["valid_mask_gate_on_export"] = self.valid_mask_gate_on_export
+        if self.detector_aux_head is not None:
+            detector_aux_logits = self.detector_aux_head(recon)
+            aux["detector_aux_logits"] = detector_aux_logits
+            aux["detector_aux_probs"] = torch.sigmoid(detector_aux_logits)
         return recon, aux
 
 def build_model(config):

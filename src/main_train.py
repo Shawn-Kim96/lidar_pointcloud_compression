@@ -97,6 +97,12 @@ def parse_args():
         default="Car,Pedestrian,Cyclist",
         help="Comma-separated classes to define ROI for KITTI object.",
     )
+    parser.add_argument(
+        "--kitti_teacher_target_root",
+        type=str,
+        default="",
+        help="Optional directory with per-sample Track2 teacher target maps (<sample_id>.npy).",
+    )
     parser.add_argument("--save_dir", type=str, default=None)
     parser.add_argument("--max_train_frames", type=int, default=0, help="If >0, train on first N frames for fast ablations.")
     parser.add_argument("--img_h", type=int, default=64)
@@ -133,6 +139,17 @@ def parse_args():
     parser.add_argument("--recon_xyz_weight", type=float, default=1.0)
     parser.add_argument("--recon_remission_weight", type=float, default=1.0)
     parser.add_argument("--lambda_ray_consistency", type=float, default=0.0)
+    parser.add_argument("--lambda_valid_mask", type=float, default=0.0)
+    parser.add_argument("--lambda_valid_mask_dice", type=float, default=0.0)
+    parser.add_argument("--lambda_range_grad_row", type=float, default=0.0)
+    parser.add_argument("--lambda_range_grad_col", type=float, default=0.0)
+    parser.add_argument("--lambda_row_profile", type=float, default=0.0)
+    parser.add_argument("--lambda_detector_target", type=float, default=0.0)
+    parser.add_argument("--mask_head", action="store_true", help="Enable valid-mask prediction head on reconstructed RI.")
+    parser.add_argument("--mask_head_hidden_channels", type=int, default=32)
+    parser.add_argument("--mask_head_gate_threshold", type=float, default=0.5)
+    parser.add_argument("--detector_aux_head", action="store_true", help="Enable detector-aware auxiliary logit head.")
+    parser.add_argument("--detector_aux_hidden_channels", type=int, default=32)
 
     parser.add_argument("--loss_recipe", type=str, default="legacy", choices=("legacy", "balanced_v1", "balanced_v2"))
     parser.add_argument(
@@ -231,6 +248,7 @@ def _print_experiment_summary(args, device, save_dir):
         print(f"kitti_split: {args.kitti_split}")
         print(f"kitti_imageset_file: {args.kitti_imageset_file or 'auto(ImageSets/<split>.txt)'}")
         print(f"kitti_roi_classes: {args.kitti_roi_classes}")
+        print(f"kitti_teacher_target_root: {args.kitti_teacher_target_root or 'none'}")
     print(f"epochs: {args.epochs}")
     print(f"batch_size: {args.batch_size}")
     print(f"num_workers: {args.num_workers}")
@@ -265,6 +283,17 @@ def _print_experiment_summary(args, device, save_dir):
         f"remission={args.recon_remission_weight}"
     )
     print(f"lambda_ray_consistency: {args.lambda_ray_consistency}")
+    print(f"lambda_valid_mask: {args.lambda_valid_mask}")
+    print(f"lambda_valid_mask_dice: {args.lambda_valid_mask_dice}")
+    print(f"lambda_range_grad_row: {args.lambda_range_grad_row}")
+    print(f"lambda_range_grad_col: {args.lambda_range_grad_col}")
+    print(f"lambda_row_profile: {args.lambda_row_profile}")
+    print(f"lambda_detector_target: {args.lambda_detector_target}")
+    print(f"mask_head: {args.mask_head}")
+    print(f"mask_head_hidden_channels: {args.mask_head_hidden_channels}")
+    print(f"mask_head_gate_threshold: {args.mask_head_gate_threshold}")
+    print(f"detector_aux_head: {args.detector_aux_head}")
+    print(f"detector_aux_hidden_channels: {args.detector_aux_hidden_channels}")
     print(f"rate_loss_mode: {args.rate_loss_mode or 'auto_by_recipe'}")
     print(f"importance_loss_mode: {args.importance_loss_mode or 'auto_by_recipe'}")
     print(f"importance_pos_weight_mode: {args.importance_pos_weight_mode}")
@@ -335,6 +364,7 @@ def main():
             roi_classes=roi_classes,
             return_raw_points=args.pillar_side_branch,
             max_raw_points=args.pillar_max_raw_points,
+            teacher_target_root=args.kitti_teacher_target_root or None,
         )
     else:
         raise ValueError(f"Unsupported dataset_type: {args.dataset_type}")
@@ -453,6 +483,28 @@ def main():
                     "activation": "silu",
                 }
             ),
+            "mask_head_config": (
+                None
+                if not args.mask_head
+                else {
+                    "enabled": True,
+                    "hidden_channels": args.mask_head_hidden_channels,
+                    "gate_threshold": args.mask_head_gate_threshold,
+                    "gate_on_export": True,
+                    "norm": "batch",
+                    "activation": "relu",
+                }
+            ),
+            "detector_aux_head_config": (
+                None
+                if not args.detector_aux_head
+                else {
+                    "enabled": True,
+                    "hidden_channels": args.detector_aux_hidden_channels,
+                    "norm": "batch",
+                    "activation": "relu",
+                }
+            ),
         },
         "teacher": {
             "enabled": not args.no_teacher,
@@ -485,6 +537,12 @@ def main():
             "recon_xyz_weight": args.recon_xyz_weight,
             "recon_remission_weight": args.recon_remission_weight,
             "w_ray_consistency": args.lambda_ray_consistency,
+            "w_valid_mask": args.lambda_valid_mask,
+            "w_valid_mask_dice": args.lambda_valid_mask_dice,
+            "w_range_grad_row": args.lambda_range_grad_row,
+            "w_range_grad_col": args.lambda_range_grad_col,
+            "w_row_profile": args.lambda_row_profile,
+            "w_detector_target": args.lambda_detector_target,
             "recipe": args.loss_recipe,
             "rate_loss_mode": args.rate_loss_mode,
             "importance_loss_mode": args.importance_loss_mode,

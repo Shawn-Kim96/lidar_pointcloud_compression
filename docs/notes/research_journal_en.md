@@ -218,6 +218,59 @@ Purpose: keep a date-ordered record of what was tested, why it was tested, what 
 - Use updated notebook outputs for communication, but avoid over-claiming ROI-aware gains until importance separation is fixed.
 - Next experiments should prioritize importance calibration/separation (targeting, weighting, and head supervision diagnostics) before new architecture complexity.
 
+## 2026-03-16: Track 2 codec root-cause cycle launched
+
+### Last Experiments Result
+- The repaired `RangeDet` raw/basic baseline remained the correct Track 2 reference:
+  - `AP3D@0.3 = 0.5700`
+  - `AP3D@0.5 = 0.4979`
+  - `AP3D@0.7 = 0.2435`
+- Therefore the Track 2 collapse is now attributed to the codec path, not to the raw detector baseline.
+- A new multi-frame Track 2 artifact analysis notebook and summary table were added:
+  - `notebooks/track2_codec_root_cause.ipynb`
+  - `notebooks/track2_codec_root_cause.executed.ipynb`
+  - `logs/track2_codec_root_cause_summary.csv`
+  - `logs/track2_codec_root_cause_figs/`
+- The current artifact summary already shows a strong RI degradation pattern:
+  - `valid_mask_iou` drops from `1.0` in raw/basic to about `0.78-0.81` in Stage0/Stage1
+  - `row_profile_mae` increases strongly from `0.0` in raw/basic to about `2.45-3.40`
+  - the dominant failure tag is currently mostly `banding`
+
+### Result Discussion & Problem Setting
+- The present Track 2 question is no longer “does RangeDet work on KITTI RI?”
+- That question is now answered: yes, the repaired raw/basic baseline is usable.
+- The current question is “which RI artifact created by the codec is destroying detection?”
+- Based on the current artifact summary and qualitative notebook overlays, the leading failure modes are:
+  - occupancy / valid-mask corruption
+  - row-wise banding / decoder artifact
+  - detector-agnostic training objective
+- For Track 2, adding extra 3D side information is not the first move.
+- Since `raw PC -> RI -> RangeDet` already works, the first recovery path should remain RI-native.
+
+### Next Steps
+- Implemented four no-quant Track 2 pilot branches:
+  - `Pilot A`: mask-aware codec
+  - `Pilot B`: anti-banding skip decoder
+  - `Pilot C`: detector-aware auxiliary target using repaired raw/basic RangeDet prediction maps
+  - `Pilot D`: combined skip decoder + mask-aware + anti-banding losses
+- Exported detector-aware teacher maps from the repaired raw/basic archive:
+  - `data/dataset/rangedet_teacher_targets_raw24_260315/`
+- Submitted the pilot chain:
+  - `26265` `t2p_mask_train`
+  - `26266` `t2p_mask_eval`
+  - `26267` `t2p_band_train`
+  - `26268` `t2p_band_eval`
+  - `26269` `t2p_det_train`
+  - `26270` `t2p_det_eval`
+  - `26271` `t2p_combo_train`
+  - `26272` `t2p_combo_eval`
+  - `26273` `t2p_compare`
+- Current execution policy:
+  - `Pilot A` and `Pilot B` run first
+  - `Pilot C` waits on `Pilot A` eval
+  - `Pilot D` waits on `Pilot B` eval
+  - final compare waits on all four eval jobs
+
 ---
 
 ## 2026-02-24

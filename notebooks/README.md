@@ -12,6 +12,9 @@ This directory contains analysis notebooks and a curated set of summary CSV/MD f
 - [`rangedet_analysis.ipynb`](/home/018219422/lidar_pointcloud_compression/notebooks/rangedet_analysis.ipynb)
   - Visualizes raw vs reconstructed range images and RangeDet predictions
 
+- [`track2_codec_root_cause.ipynb`](/home/018219422/lidar_pointcloud_compression/notebooks/track2_codec_root_cause.ipynb)
+  - Multi-frame Track 2 artifact analysis using repaired raw/basic, Stage 0, and Stage 1 RangeDet outputs
+
 - [`stage0_stage1_kitti_pointpillar_visualization.ipynb`](/home/018219422/lidar_pointcloud_compression/notebooks/stage0_stage1_kitti_pointpillar_visualization.ipynb)
   - Track 1 endpoint visualization
 

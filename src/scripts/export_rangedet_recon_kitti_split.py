@@ -111,7 +111,7 @@ def _reconstruct_range_image(
     fov_down_deg: float,
     quantize: bool,
     noise_std: float,
-) -> np.ndarray:
+) -> tuple[np.ndarray, Dict[str, Any]]:
     data_5ch, _ = project_points_to_range_image(
         points_xyzi,
         img_h=img_h,
@@ -122,14 +122,17 @@ def _reconstruct_range_image(
     x = torch.from_numpy(data_5ch).unsqueeze(0).to(device)
     raw_points_t = torch.from_numpy(np.asarray(points_xyzi[:, :4], dtype=np.float32)).unsqueeze(0).to(device)
     raw_point_counts_t = torch.tensor([points_xyzi.shape[0]], device=device, dtype=torch.long)
-    recon, _ = model(
+    recon, aux = model(
         x,
         noise_std=float(noise_std),
         quantize=bool(quantize),
         raw_points=raw_points_t,
         raw_point_counts=raw_point_counts_t,
     )
-    return recon.squeeze(0).detach().cpu().numpy().astype(np.float32)
+    return (
+        recon.squeeze(0).detach().cpu().numpy().astype(np.float32),
+        {k: v.detach().cpu() if torch.is_tensor(v) else v for k, v in aux.items()},
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -220,7 +223,7 @@ def main() -> None:
         lidar_bin = _resolve_lidar_bin(kitti_root, sample_id, args.lidar_subdir)
         raw_points = load_kitti_bin(lidar_bin)
 
-        recon_5ch = _reconstruct_range_image(
+        recon_5ch, recon_aux = _reconstruct_range_image(
             model,
             device,
             raw_points,
@@ -231,6 +234,15 @@ def main() -> None:
             quantize=args.quantize,
             noise_std=args.noise_std,
         )
+        pred_valid_mask = recon_aux.get("pred_valid_mask", None)
+        if pred_valid_mask is not None and bool(recon_aux.get("valid_mask_gate_on_export", False)):
+            gate_threshold = float(recon_aux.get("valid_mask_gate_threshold", 0.5))
+            gate = (pred_valid_mask.squeeze(0).squeeze(0).numpy() >= gate_threshold).astype(np.float32)
+            recon_5ch[0] *= gate
+            recon_5ch[1] *= gate
+            recon_5ch[2] *= gate
+            recon_5ch[3] *= gate
+            recon_5ch[4] *= gate
 
         src_npz = np.load(str(src_url))
         inclination = src_npz["inclination"].astype(np.float32)
