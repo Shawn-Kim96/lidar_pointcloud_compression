@@ -12,32 +12,45 @@ The repository contains both the core compression models and the orchestration s
 - `Track 1` is currently focused on geometry preservation for reconstructed point clouds.
 - `Track 2` now has a repaired `RangeDet` raw/basic baseline; the current bottleneck is the codec, not the detector baseline.
 - The most up-to-date running notes are in:
-  - [research_journal_en.md](/home/018219422/lidar_pointcloud_compression/docs/notes/research_journal_en.md)
+  - [research_journal_en.md](docs/notes/research_journal_en.md)
+
+## Project Page
+
+- A GitHub Pages-ready project page now lives in:
+  - [`docs/index.html`](docs/index.html)
+- Supporting public-facing notes:
+  - [`docs/gallery.html`](docs/gallery.html)
+  - [`docs/evidence.html`](docs/evidence.html)
+  - [`docs/asset-gaps.html`](docs/asset-gaps.html)
+- Recommended publish setup:
+  - GitHub Pages -> `Deploy from a branch`
+  - Branch: `main`
+  - Folder: `/docs`
 
 ## Repository Map
 
 | Path | Purpose |
 |---|---|
-| [`src/main_train.py`](/home/018219422/lidar_pointcloud_compression/src/main_train.py) | Main PyTorch training entrypoint for the in-repo compression model |
-| [`src/models/`](/home/018219422/lidar_pointcloud_compression/src/models) | Compression model, autoencoder/decoder, quantization, side branches |
-| [`src/dataset/`](/home/018219422/lidar_pointcloud_compression/src/dataset) | SemanticKITTI and KITTI range-image loaders |
-| [`src/train/`](/home/018219422/lidar_pointcloud_compression/src/train) | Trainer and evaluation utilities |
-| [`src/scripts/`](/home/018219422/lidar_pointcloud_compression/src/scripts) | Reproducible Slurm launch scripts, dataset export, external detector evaluation |
-| [`src/utils/`](/home/018219422/lidar_pointcloud_compression/src/utils) | Identity export, reconstruction export, experiment bookkeeping |
-| [`docs/notes/`](/home/018219422/lidar_pointcloud_compression/docs/notes) | Research journal and informal notes |
-| [`docs/report/`](/home/018219422/lidar_pointcloud_compression/docs/report) | Experiment plans, ablation writeups, structured reports |
-| [`docs/papers/`](/home/018219422/lidar_pointcloud_compression/docs/papers) | Local copies / text extracts of external papers used for analysis |
-| [`notebooks/`](/home/018219422/lidar_pointcloud_compression/notebooks) | Visualization and post-hoc analysis notebooks |
-| [`logs/`](/home/018219422/lidar_pointcloud_compression/logs) | Slurm logs, manifests, archive evaluation summaries |
-| [`data/results/experiments/`](/home/018219422/lidar_pointcloud_compression/data/results/experiments) | Per-run checkpoints and `config.yaml` files |
-| [`third_party/`](/home/018219422/lidar_pointcloud_compression/third_party) | External dependencies such as OpenPCDet, RangeDet, and RENO |
+| [`src/main_train.py`](src/main_train.py) | Main PyTorch training entrypoint for the in-repo compression model |
+| [`src/models/`](src/models) | Compression model, autoencoder/decoder, quantization, side branches |
+| [`src/dataset/`](src/dataset) | SemanticKITTI and KITTI range-image loaders |
+| [`src/train/`](src/train) | Trainer and evaluation utilities |
+| [`src/scripts/`](src/scripts) | Reproducible Slurm launch scripts, dataset export, external detector evaluation |
+| [`src/utils/`](src/utils) | Identity export, reconstruction export, experiment bookkeeping |
+| [`docs/notes/`](docs/notes) | Research journal and informal notes |
+| [`docs/report/`](docs/report) | Experiment plans, ablation writeups, structured reports |
+| [`docs/papers/`](docs/papers) | Local copies / text extracts of external papers used for analysis |
+| [`notebooks/`](notebooks) | Visualization and post-hoc analysis notebooks |
+| [`logs/`](logs) | Slurm logs, manifests, archive evaluation summaries |
+| [`data/results/experiments/`](data/results/experiments) | Per-run checkpoints and `config.yaml` files |
+| `third_party/` | External dependencies such as OpenPCDet, RangeDet, and RENO when that local workspace is populated |
 
 For a more detailed orientation guide, start here:
 
-- [docs/repo_guide.md](/home/018219422/lidar_pointcloud_compression/docs/repo_guide.md)
-- [src/README.md](/home/018219422/lidar_pointcloud_compression/src/README.md)
-- [notebooks/README.md](/home/018219422/lidar_pointcloud_compression/notebooks/README.md)
-- [logs/README.md](/home/018219422/lidar_pointcloud_compression/logs/README.md)
+- [docs/repo_guide.md](docs/repo_guide.md)
+- [src/README.md](src/README.md)
+- [notebooks/README.md](notebooks/README.md)
+- [logs/](logs)
 
 ## Main Workflows
 
@@ -45,7 +58,7 @@ For a more detailed orientation guide, start here:
 
 Primary entrypoint:
 
-- [`src/main_train.py`](/home/018219422/lidar_pointcloud_compression/src/main_train.py)
+- [`src/main_train.py`](src/main_train.py)
 
 Typical usage:
 
@@ -65,74 +78,74 @@ PYTHONPATH=src python src/main_train.py \
 
 This chain trains a codec, exports `KITTI_Identity`, fine-tunes PointPillars, and runs endpoint evaluation.
 
-- [`src/scripts/run_track1_noquant_chain.sh`](/home/018219422/lidar_pointcloud_compression/src/scripts/run_track1_noquant_chain.sh)
+- [`src/scripts/run_track1_noquant_chain.sh`](src/scripts/run_track1_noquant_chain.sh)
 
 Recent submitters:
 
-- [`submit_track1_pillar_main.sh`](/home/018219422/lidar_pointcloud_compression/src/scripts/submit_track1_pillar_main.sh)
-- [`submit_track1_pillar_skip_main.sh`](/home/018219422/lidar_pointcloud_compression/src/scripts/submit_track1_pillar_skip_main.sh)
+- [`submit_track1_pillar_main.sh`](src/scripts/submit_track1_pillar_main.sh)
+- [`submit_track1_pillar_skip_main.sh`](src/scripts/submit_track1_pillar_skip_main.sh)
 
 ### 3. Track 2: RangeDet raw/basic and reconstructed RI evaluation
 
 Core scripts:
 
 - raw training:
-  - [`run_rangedet_kitti_train.sh`](/home/018219422/lidar_pointcloud_compression/src/scripts/run_rangedet_kitti_train.sh)
+  - [`run_rangedet_kitti_train.sh`](src/scripts/run_rangedet_kitti_train.sh)
 - raw eval:
-  - [`run_rangedet_raw_eval.sh`](/home/018219422/lidar_pointcloud_compression/src/scripts/run_rangedet_raw_eval.sh)
+  - [`run_rangedet_raw_eval.sh`](src/scripts/run_rangedet_raw_eval.sh)
 - reconstructed Stage0/Stage1 eval:
-  - [`run_rangedet_stage_eval.sh`](/home/018219422/lidar_pointcloud_compression/src/scripts/run_rangedet_stage_eval.sh)
+  - [`run_rangedet_stage_eval.sh`](src/scripts/run_rangedet_stage_eval.sh)
 
 Recent submitters:
 
-- [`submit_track2_rangedet_patched_chain.sh`](/home/018219422/lidar_pointcloud_compression/src/scripts/submit_track2_rangedet_patched_chain.sh)
-- [`submit_track2_rangedet_skip_stage0.sh`](/home/018219422/lidar_pointcloud_compression/src/scripts/submit_track2_rangedet_skip_stage0.sh)
+- [`submit_track2_rangedet_patched_chain.sh`](src/scripts/submit_track2_rangedet_patched_chain.sh)
+- [`submit_track2_rangedet_skip_stage0.sh`](src/scripts/submit_track2_rangedet_skip_stage0.sh)
 
 ### 4. Evaluation and archive comparison
 
 - custom lidar-space archive AP:
-  - [`eval_rangedet_archive_car_ap.py`](/home/018219422/lidar_pointcloud_compression/src/scripts/eval_rangedet_archive_car_ap.py)
+  - [`eval_rangedet_archive_car_ap.py`](src/scripts/eval_rangedet_archive_car_ap.py)
 - KITTI-style archive evaluation bridge:
-  - [`eval_rangedet_archive_kitti_official.py`](/home/018219422/lidar_pointcloud_compression/src/scripts/eval_rangedet_archive_kitti_official.py)
+  - [`eval_rangedet_archive_kitti_official.py`](src/scripts/eval_rangedet_archive_kitti_official.py)
 - combined compare wrapper:
-  - [`run_rangedet_archive_compare.sh`](/home/018219422/lidar_pointcloud_compression/src/scripts/run_rangedet_archive_compare.sh)
+  - [`run_rangedet_archive_compare.sh`](src/scripts/run_rangedet_archive_compare.sh)
 
 ## Key Result Locations
 
 ### Experiment runs
 
 - Compression runs:
-  - [`data/results/experiments/`](/home/018219422/lidar_pointcloud_compression/data/results/experiments)
+  - [`data/results/experiments/`](data/results/experiments)
 - High-level result snapshots:
-  - [`src/results/experiments_result.md`](/home/018219422/lidar_pointcloud_compression/src/results/experiments_result.md)
-  - [`src/results/experiments_result.csv`](/home/018219422/lidar_pointcloud_compression/src/results/experiments_result.csv)
+  - [`src/results/experiments_result.md`](src/results/experiments_result.md)
+  - [`src/results/experiments_result.csv`](src/results/experiments_result.csv)
 
 ### Logs and manifests
 
 - Slurm `.out/.err` files:
-  - [`logs/`](/home/018219422/lidar_pointcloud_compression/logs)
+  - [`logs/`](logs)
 - Machine-readable submission manifests:
   - `logs/*manifest.csv`
 - RangeDet archived prediction dumps:
-  - [`logs/rangedet_eval_outputs/`](/home/018219422/lidar_pointcloud_compression/logs/rangedet_eval_outputs)
+  - `logs/rangedet_eval_outputs/` when archived detector dumps are present
 
 ### Notebook outputs
 
 - Track 1 point-cloud / range-image visualization:
-  - [`track1_identity_vs_codec_visualization.ipynb`](/home/018219422/lidar_pointcloud_compression/notebooks/track1_identity_vs_codec_visualization.ipynb)
+  - [`track1_identity_vs_codec_visualization.ipynb`](notebooks/track1_identity_vs_codec_visualization.ipynb)
 - RangeDet diagnostic notebook:
-  - [`rangedet_analysis.ipynb`](/home/018219422/lidar_pointcloud_compression/notebooks/rangedet_analysis.ipynb)
+  - [`rangedet_analysis.ipynb`](notebooks/rangedet_analysis.ipynb)
 
 ## External Dependencies
 
-This repository includes local copies of major external components:
+This research workflow expects several local external components in fuller environments:
 
 | Path | Purpose |
 |---|---|
-| [`third_party/OpenPCDet/`](/home/018219422/lidar_pointcloud_compression/third_party/OpenPCDet) | PointPillars / KITTI 3D detection |
-| [`third_party/external_range_det/RangeDet/`](/home/018219422/lidar_pointcloud_compression/third_party/external_range_det/RangeDet) | Range-image 3D detector used in Track 2 |
-| [`third_party/external_codecs/RENO/`](/home/018219422/lidar_pointcloud_compression/third_party/external_codecs/RENO) | External reconstruction/compression baseline under study |
-| [`third_party/range_view_checkpoints/`](/home/018219422/lidar_pointcloud_compression/third_party/range_view_checkpoints) | Downloaded range-view checkpoints |
+| `third_party/OpenPCDet/` | PointPillars / KITTI 3D detection |
+| `third_party/external_range_det/RangeDet/` | Range-image 3D detector used in Track 2 |
+| `third_party/external_codecs/RENO/` | External reconstruction/compression baseline under study |
+| `third_party/range_view_checkpoints/` | Downloaded range-view checkpoints |
 
 These third-party repositories are not normalized to a single coding style. The repo-specific integration scripts in `src/scripts/` are the supported entrypoints.
 
@@ -142,11 +155,11 @@ If you are new to this repository, do not start by reading random Slurm logs.
 
 Start in this order:
 
-1. [docs/repo_guide.md](/home/018219422/lidar_pointcloud_compression/docs/repo_guide.md)
-2. [src/README.md](/home/018219422/lidar_pointcloud_compression/src/README.md)
-3. [research_journal_en.md](/home/018219422/lidar_pointcloud_compression/docs/notes/research_journal_en.md)
-4. [notebooks/README.md](/home/018219422/lidar_pointcloud_compression/notebooks/README.md)
-5. [logs/README.md](/home/018219422/lidar_pointcloud_compression/logs/README.md)
+1. [docs/repo_guide.md](docs/repo_guide.md)
+2. [src/README.md](src/README.md)
+3. [research_journal_en.md](docs/notes/research_journal_en.md)
+4. [notebooks/README.md](notebooks/README.md)
+5. [logs/](logs)
 
 ## Notes
 

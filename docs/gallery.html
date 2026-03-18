@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gallery | LiDAR Point Cloud Compression</title>
+    <meta
+      name="description"
+      content="Research figure gallery for the LiDAR point cloud compression project, covering Track 1 reconstruction views and Track 2 artifact diagnostics."
+    />
+    <meta name="theme-color" content="#0f766e" />
+    <meta property="og:title" content="Gallery | LiDAR Point Cloud Compression" />
+    <meta
+      property="og:description"
+      content="Research figure gallery for the LiDAR point cloud compression project, covering Track 1 reconstruction views and Track 2 artifact diagnostics."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="assets/track1-pointpillar-endpoint-panel-web.png" />
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="site-header">
+        <a class="brand" href="index.html">
+          <span class="brand-mark">LPC</span>
+          <span class="brand-copy">
+            <strong>LiDAR Point Cloud Compression</strong>
+            <span>Research figure gallery</span>
+          </span>
+        </a>
+        <nav class="site-nav" aria-label="Primary">
+          <a href="index.html">Project Page</a>
+          <a aria-current="page" href="gallery.html">Gallery</a>
+          <a href="evidence.html">Claims</a>
+          <a href="asset-gaps.html">Asset Gaps</a>
+        </nav>
+      </header>
+
+      <main>
+        <section class="hero section">
+          <div class="hero-copy">
+            <p class="eyebrow">Visual Evidence</p>
+            <h1>Notebook outputs and diagnostic panels worth showing</h1>
+            <p class="hero-lede">
+              This page consolidates the existing PNG assets that are already credible enough for a public research
+              page. The emphasis is evidence: Track 1 shows what reconstruction loss looks like at the downstream
+              endpoint, and Track 2 shows why the current bottleneck is the codec path rather than the repaired
+              detector baseline.
+            </p>
+            <div class="hero-actions">
+              <a class="button button-primary" href="index.html">Back to project page</a>
+              <a class="button button-secondary" href="evidence.html">Claims and evidence</a>
+              <a class="button button-secondary" href="asset-gaps.html">Remaining figure gaps</a>
+            </div>
+            <p class="hero-note">
+              These are current extracted assets, not a final paper figure set. Captions stay intentionally narrow and
+              only describe what the repository can already support.
+            </p>
+          </div>
+
+          <aside class="hero-metrics">
+            <article class="metric-card accent-cyan">
+              <span class="metric-label">Track 1 figures</span>
+              <strong class="metric-value">4</strong>
+              <span class="metric-detail">Notebook-derived panels plus a lightweight identity-versus-codec compare GIF.</span>
+            </article>
+            <article class="metric-card accent-amber">
+              <span class="metric-label">Track 2 figures</span>
+              <strong class="metric-value">12</strong>
+              <span class="metric-detail">HPC-generated and notebook-reproducible panels plus compare GIFs for RangeDet failure analysis.</span>
+            </article>
+            <article class="metric-card accent-red">
+              <span class="metric-label">Best current use</span>
+              <strong class="metric-value">Failure analysis</strong>
+              <span class="metric-detail">The visuals are strongest when used to explain bottlenecks, not to oversell finished results.</span>
+            </article>
+            <article class="metric-card accent-slate">
+              <span class="metric-label">Asset policy</span>
+              <strong class="metric-value">Repo-backed</strong>
+              <span class="metric-detail">Every figure here comes from existing notebook outputs or derived exports built from them.</span>
+            </article>
+          </aside>
+        </section>
+
+        <section class="section prose-surface">
+          <p class="eyebrow">Reading Guide</p>
+          <h2>How to interpret the gallery</h2>
+          <ul class="clean-list">
+            <li><strong>Track 1:</strong> use these figures to discuss geometry preservation and why detector-facing endpoint quality still collapses after reconstruction.</li>
+            <li><strong>Track 2:</strong> use these figures to show that the raw/basic RangeDet baseline is no longer the dominant failure source once the pipeline is repaired.</li>
+            <li><strong>Presentation stance:</strong> each caption is scoped to observable evidence and avoids claims that would require unpublished quantitative follow-up.</li>
+          </ul>
+        </section>
+
+        <section class="section prose-surface">
+          <div class="gallery-subhead">
+            <div>
+              <p class="eyebrow">Track 1</p>
+              <h2>Reconstruction and endpoint context</h2>
+            </div>
+            <p>Qualitative panels extracted from executed notebook outputs.</p>
+          </div>
+
+          <div class="asset-gallery-grid">
+            <figure class="figure-card figure-card-wide">
+              <img
+                src="assets/track1-pointpillar-endpoint-panel-web.png"
+                alt="PointPillars endpoint comparison panel for Track 1."
+                width="1800"
+                height="559"
+                loading="eager"
+                decoding="async"
+              />
+              <figcaption>
+                <strong>PointPillars endpoint panel.</strong> This is the clearest Track 1 figure for connecting
+                reconstruction-side degradation to downstream 3D detection collapse. It supports the current public
+                story that the dominant weakness sits in the codec path, not in detector training alone.
+              </figcaption>
+            </figure>
+
+            <figure class="figure-card">
+              <img
+                src="assets/track1-identity-bev-panel-web.png"
+                alt="Identity-domain bird's-eye-view panel for Track 1."
+                width="1600"
+                height="1004"
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption>
+                <strong>Identity BEV panel.</strong> Reference geometry before lossy compression is introduced. This
+                panel is useful when explaining what the detector should see when the point cloud export path is not
+                the limiting factor.
+              </figcaption>
+            </figure>
+
+            <figure class="figure-card">
+              <img
+                src="assets/track1-codec-bev-panel-web.png"
+                alt="Codec-domain bird's-eye-view panel for Track 1."
+                width="1600"
+                height="1004"
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption>
+                <strong>Codec BEV panel.</strong> The paired reconstructed view shows how local structural drift and
+                sparsification become visible even before endpoint metrics are quoted. It complements the large gap
+                reported in the Track 1 detector summary.
+              </figcaption>
+            </figure>
+
+            <figure class="figure-card figure-card-wide compact-figure">
+              <img
+                src="assets/track1-identity-vs-codec.gif"
+                alt="Animated identity-versus-codec comparison for Track 1."
+                width="1600"
+                height="1048"
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption>
+                <strong>Track 1 motion compare.</strong> A lightweight toggle between the identity and codec BEV
+                panels, useful when presenting the qualitative shift without opening the notebook itself.
+              </figcaption>
+            </figure>
+          </div>
+        </section>
+
+        <section class="section prose-surface">
+          <div class="gallery-subhead">
+            <div>
+              <p class="eyebrow">Track 2</p>
+              <h2>RangeDet-oriented artifact diagnostics</h2>
+            </div>
+            <p>Diagnostic panels generated from the repaired RangeDet evaluation workflow.</p>
+          </div>
+
+          <div class="asset-gallery-grid">
+            <figure class="figure-card figure-card-wide">
+              <img
+                src="assets/track2-rangedet-analysis-preview-web.png"
+                alt="RangeDet analysis preview for Track 2."
+                width="1800"
+                height="750"
+                loading="eager"
+                decoding="async"
+              />
+              <figcaption>
+                <strong>RangeDet analysis preview.</strong> Overview panel comparing repaired raw/basic behavior with
+                reconstructed inputs. It is the most compact figure for motivating why Track 2 is now suitable for
+                codec-root-cause discussion instead of baseline debugging.
+              </figcaption>
+            </figure>
+
+            <figure class="figure-card">
+              <img
+                src="assets/track2-rootcause-worst-web.png"
+                alt="Worst-case root-cause diagnostic panel for Track 2."
+                width="1800"
+                height="711"
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption>
+                <strong>Worst-case root-cause panel.</strong> Makes the failure mode concrete by exposing mask
+                corruption and banding in a severe frame. This is useful when arguing that the artifact signature is
+                operationally meaningful rather than a vague visual impression.
+              </figcaption>
+            </figure>
+
+            <figure class="figure-card">
+              <img
+                src="assets/track2-rootcause-cycle.gif"
+                alt="Animated comparison of median and worst-case root-cause diagnostic panels for Track 2."
+                width="1800"
+                height="755"
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption>
+                <strong>Track 2 motion compare.</strong> A simple cycle between median and worst-case root-cause
+                panels. It is not a full temporal detector animation, but it is enough to communicate that the
+                artifact family is not confined to one frame.
+              </figcaption>
+            </figure>
+
+            <figure class="figure-card figure-card-wide compact-figure">
+              <img
+                src="assets/track2-artifact-profiles-web.png"
+                alt="Track 2 artifact profile summary."
+                width="1600"
+                height="486"
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption>
+                <strong>Artifact profiles.</strong> Aggregated profiles convert recurring visual defects into a
+                repeatable diagnostic summary. This figure is the best bridge from qualitative screenshots to a more
+                disciplined Stage 2 and Stage 3 debugging narrative.
+              </figcaption>
+            </figure>
+          </div>
+        </section>
+
+        <section class="section prose-surface">
+          <div class="gallery-subhead">
+            <div>
+              <p class="eyebrow">Track 2 Deep Dive</p>
+              <h2>Detector matching and multi-case diagnostics</h2>
+            </div>
+            <p>Additional March 17, 2026 exports pulled from the HPC workspace and converted into web-ready assets.</p>
+          </div>
+
+          <div class="asset-gallery-grid">
+            <figure class="figure-card figure-card-wide">
+              <img
+                src="assets/track2-cell5-latest-web.png"
+                alt="GT-versus-RangeDet envelope comparison for raw and reconstructed range images."
+                width="1800"
+                height="456"
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption>
+                <strong>Envelope compare.</strong> This panel strips the view down to projected GT envelopes and
+                RangeDet envelopes for the same frame. It is useful when explaining that the reconstructed input does
+                not merely lower confidence, but spatially distorts the detector's localization pattern.
+              </figcaption>
+            </figure>
+
+            <figure class="figure-card figure-card-wide">
+              <img
+                src="assets/track2-rangedet-overview-panel-web.png"
+                alt="Notebook-derived Track 2 overview panel comparing raw and reconstructed RangeDet views."
+                width="1800"
+                height="623"
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption>
+                <strong>Notebook overview panel.</strong> Directly regenerated from
+                <code>rangedet_analysis.executed.ipynb</code>, this provides a reproducible raw-versus-reconstructed
+                overview with GT and detector envelopes in one place.
+              </figcaption>
+            </figure>
+
+            <figure class="figure-card">
+              <img
+                src="assets/track2-rangedet-zoom-panel-web.png"
+                alt="Notebook-derived Track 2 zoom panel centered on the detector-critical crop."
+                width="1800"
+                height="755"
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption>
+                <strong>Notebook zoom panel.</strong> Tightens the crop around the detector-critical region so the
+                raw-versus-reconstructed mismatch reads clearly without relying only on a root-cause extreme.
+              </figcaption>
+            </figure>
+
+            <figure class="figure-card">
+              <img
+                src="assets/track2-rangedet-overview-zoom.gif"
+                alt="Animated comparison between the Track 2 overview and zoom notebook panels."
+                width="1600"
+                height="554"
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption>
+                <strong>Overview-to-zoom motion compare.</strong> Alternates between the full diagnostic panel and the
+                tighter crop, which is useful when presenting the same failure from scene context down to a local box.
+              </figcaption>
+            </figure>
+
+            <figure class="figure-card">
+              <img
+                src="assets/track2-exactgrid-preview-web.png"
+                alt="Exact-grid detector matching preview for raw and reconstructed range images."
+                width="1800"
+                height="750"
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption>
+                <strong>Exact-grid matching.</strong> A stricter raw-versus-reconstructed comparison using exact grid
+                agreement. This makes row-wise corruption visually obvious without changing the scene content.
+              </figcaption>
+            </figure>
+
+            <figure class="figure-card">
+              <img
+                src="assets/track2-exactlut-preview-web.png"
+                alt="Exact-LUT detector matching preview for raw and reconstructed range images."
+                width="1800"
+                height="750"
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption>
+                <strong>Exact-LUT matching.</strong> The same scene under a LUT-style matching rule. Showing both
+                together prevents overfitting the visual argument to one matching definition.
+              </figcaption>
+            </figure>
+
+            <figure class="figure-card figure-card-wide compact-figure">
+              <img
+                src="assets/track2-grid-vs-lut.gif"
+                alt="Animated comparison between exact-grid and exact-LUT Track 2 diagnostic previews."
+                width="1400"
+                height="583"
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption>
+                <strong>Grid-versus-LUT motion compare.</strong> A compact way to show that the broad failure story
+                survives across two detector-matching interpretations.
+              </figcaption>
+            </figure>
+
+            <figure class="figure-card figure-card-wide compact-figure">
+              <img
+                src="assets/track2-rootcause-spectrum.gif"
+                alt="Animated cycle across multiple median and worst Track 2 root-cause panels."
+                width="1400"
+                height="553"
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption>
+                <strong>Multi-case root-cause cycle.</strong> This cycles through multiple median and worst examples
+                instead of just one pair, which makes the recurring artifact family look less anecdotal.
+              </figcaption>
+            </figure>
+          </div>
+        </section>
+
+        <section class="section prose-surface">
+          <p class="eyebrow">Asset Manifest</p>
+          <h2>Referenced files in <code>docs/assets</code></h2>
+          <ul class="clean-list">
+            <li><code>track1-pointpillar-endpoint-panel-web.png</code></li>
+            <li><code>track1-identity-bev-panel-web.png</code></li>
+            <li><code>track1-codec-bev-panel-web.png</code></li>
+            <li><code>track1-identity-vs-codec.gif</code></li>
+            <li><code>track2-rangedet-analysis-preview-web.png</code></li>
+            <li><code>track2-rootcause-worst-web.png</code></li>
+            <li><code>track2-rootcause-cycle.gif</code></li>
+            <li><code>track2-artifact-profiles-web.png</code></li>
+            <li><code>track2-cell5-latest-web.png</code></li>
+            <li><code>track2-rangedet-overview-panel-web.png</code></li>
+            <li><code>track2-rangedet-zoom-panel-web.png</code></li>
+            <li><code>track2-rangedet-overview-zoom.gif</code></li>
+            <li><code>track2-exactgrid-preview-web.png</code></li>
+            <li><code>track2-exactlut-preview-web.png</code></li>
+            <li><code>track2-grid-vs-lut.gif</code></li>
+            <li><code>track2-rootcause-spectrum.gif</code></li>
+          </ul>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

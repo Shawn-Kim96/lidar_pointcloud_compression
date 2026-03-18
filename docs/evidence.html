@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Claims and Evidence | LiDAR Point Cloud Compression</title>
+    <meta
+      name="description"
+      content="Repository-backed evidence map for the LiDAR point cloud compression project page, linking public claims to specific code, notebook, and note artifacts."
+    />
+    <meta name="theme-color" content="#0f766e" />
+    <meta property="og:title" content="Claims and Evidence | LiDAR Point Cloud Compression" />
+    <meta
+      property="og:description"
+      content="Repository-backed evidence map for the LiDAR point cloud compression project page."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="assets/track1-pointpillar-endpoint-panel-web.png" />
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page-shell page-shell-narrow">
+      <header class="site-header">
+        <a class="brand" href="index.html">
+          <span class="brand-mark">LPC</span>
+          <span class="brand-copy">
+            <strong>LiDAR Point Cloud Compression</strong>
+            <span>Claims and evidence</span>
+          </span>
+        </a>
+        <nav class="site-nav" aria-label="Secondary">
+          <a href="index.html">Project Page</a>
+          <a href="gallery.html">Gallery</a>
+          <a href="asset-gaps.html">Asset Gaps</a>
+        </nav>
+      </header>
+
+      <main class="section prose-surface">
+        <p class="eyebrow">Evidence map</p>
+        <h1>Claims and evidence notes</h1>
+        <p class="page-intro">
+          This page records which repository artifacts support the major public-facing claims on the project page.
+          Each item is phrased conservatively on purpose.
+        </p>
+
+        <section class="evidence-block">
+          <h2>The repository is organized around two downstream evaluation tracks</h2>
+          <ul class="evidence-list">
+            <li>
+              <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/README.md#L3-L8">README.md lines 3-8</a>
+              define Track 1 as point cloud → range image → point cloud with PointPillars, and Track 2 as point cloud → range image with RangeDet.
+            </li>
+            <li>
+              <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/README.md#L64-L98">README.md lines 64-98</a>
+              link those tracks to their current execution scripts.
+            </li>
+          </ul>
+        </section>
+
+        <section class="evidence-block">
+          <h2>The active method is a 5-channel range-image codec with ROI-aware importance control</h2>
+          <ul class="evidence-list">
+            <li>
+              <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/docs/notes/research_progress.md#L16-L38">research_progress.md lines 16-38</a>
+              summarize the current architecture: 5-channel input, <code>resnet</code>/<code>darknet</code> backbone, <code>pp_lite</code> head, adaptive quantization, decoder, and optional teacher distillation.
+            </li>
+            <li>
+              <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/src/main_train.py#L31-L219">src/main_train.py lines 31-219</a>
+              expose the training flags for quantizer mode, ROI target mode, distillation, head variants, decoder type, and detector-aware auxiliaries.
+            </li>
+            <li>
+              <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/src/models/compression.py#L166-L200">src/models/compression.py lines 166-200</a>
+              show the adaptive quantizer and ROI importance head being wired into the top-level model.
+            </li>
+          </ul>
+        </section>
+
+        <section class="evidence-block">
+          <h2>Track 2 now has a credible baseline, so the codec is the main bottleneck</h2>
+          <ul class="evidence-list">
+            <li>
+              <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/docs/notes/research_journal_en.md#L221-L248">research_journal_en.md lines 221-248</a>
+              say explicitly that the repaired raw/basic RangeDet baseline answered the “does the detector work?” question.
+            </li>
+            <li>
+              <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/notebooks/results_summary_current.md#L41-L61">results_summary_current.md lines 41-61</a>
+              report <code>AP3D@0.5 = 0.4979</code> for raw/basic, versus near-zero values for reconstructed settings.
+            </li>
+          </ul>
+        </section>
+
+        <section class="evidence-block">
+          <h2>Track 1 reconstruction is still the bottleneck even when the detector side looks stable</h2>
+          <ul class="evidence-list">
+            <li>
+              <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/notebooks/results_summary_current.md#L7-L18">results_summary_current.md lines 7-18</a>
+              keep the identity-domain PointPillars runs around <code>~73 mAP3D(mod)</code>.
+            </li>
+            <li>
+              <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/notebooks/results_summary_current.md#L20-L37">results_summary_current.md lines 20-37</a>
+              show reconstructed endpoint results far below their paired references, with the best current entry still at <code>2.192242</code>.
+            </li>
+            <li>
+              <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/docs/report/paper_fair_comparison_table.md#L123-L131">paper_fair_comparison_table.md lines 123-131</a>
+              preserve one explicit detector-endpoint pair where the reference and reconstructed results are dramatically separated.
+            </li>
+          </ul>
+        </section>
+
+        <section class="evidence-block">
+          <h2>Oracle ROI results suggest there is still quantizer upside</h2>
+          <ul class="evidence-list">
+            <li>
+              <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/docs/notes/research_progress.md#L183-L206">research_progress.md lines 183-206</a>
+              interpret native-vs-oracle results as evidence that importance-map quality remains the immediate bottleneck.
+            </li>
+            <li>
+              <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/docs/report/paper_fair_comparison_table.md#L65-L79">paper_fair_comparison_table.md lines 65-79</a>
+              quantify the approximate entropy reduction under oracle ROI forcing.
+            </li>
+          </ul>
+        </section>
+
+        <section class="evidence-block">
+          <h2>Projection-path sparsification is a serious pre-codec bottleneck</h2>
+          <ul class="evidence-list">
+            <li>
+              <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/docs/notes/research_progress.md#L279-L307">research_progress.md lines 279-307</a>
+              report raw vs identity vs reconstructed decomposition, including mean retention of <code>0.4169</code>.
+            </li>
+            <li>
+              <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/docs/notes/research_progress.md#L311-L326">research_progress.md lines 311-326</a>
+              keep that sparsification issue in the current-status section rather than burying it in old notes.
+            </li>
+          </ul>
+        </section>
+
+        <section class="evidence-block">
+          <h2>The immediate experimental direction is Track 2 root-cause recovery, not broad storytelling</h2>
+          <ul class="evidence-list">
+            <li>
+              <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/docs/notes/research_journal_en.md#L250-L272">research_journal_en.md lines 250-272</a>
+              enumerate pilot branches A-D and the dependency order across the submitted jobs.
+            </li>
+            <li>
+              <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/docs/notes/research_journal_en.md#L234-L247">research_journal_en.md lines 234-247</a>
+              keep the focus on valid-mask corruption, banding, and detector-agnostic objectives as the leading hypotheses.
+            </li>
+          </ul>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

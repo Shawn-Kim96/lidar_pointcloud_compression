@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Asset Gaps | LiDAR Point Cloud Compression</title>
+    <meta
+      name="description"
+      content="Specific figure, GIF, and summary assets that would most improve the LiDAR point cloud compression project page."
+    />
+    <meta name="theme-color" content="#0f766e" />
+    <meta property="og:title" content="Asset Gaps | LiDAR Point Cloud Compression" />
+    <meta
+      property="og:description"
+      content="Specific figure, GIF, and summary assets that would most improve the LiDAR point cloud compression project page."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="assets/track1-pointpillar-endpoint-panel-web.png" />
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page-shell page-shell-narrow">
+      <header class="site-header">
+        <a class="brand" href="index.html">
+          <span class="brand-mark">LPC</span>
+          <span class="brand-copy">
+            <strong>LiDAR Point Cloud Compression</strong>
+            <span>Figure and context wishlist</span>
+          </span>
+        </a>
+        <nav class="site-nav" aria-label="Secondary">
+          <a href="index.html">Project Page</a>
+          <a href="gallery.html">Gallery</a>
+          <a href="evidence.html">Claims</a>
+        </nav>
+      </header>
+
+      <main class="section prose-surface">
+        <p class="eyebrow">Asset wishlist</p>
+        <h1>What would make the page even stronger</h1>
+        <p class="page-intro">
+          The current site is already supportable from local summaries, notebooks, and architecture assets. The
+          remaining gap is mostly visual polish: exported figures and short motion assets that are present in notebook
+          logic but not yet committed as public-facing media.
+        </p>
+
+        <section class="gap-block">
+          <h2>1. Track 1 qualitative reconstruction panel</h2>
+          <p><strong>Status now:</strong> usable Track 1 notebook PNGs have been extracted into <code>docs/assets/</code>, including identity/codec BEV panels and a PointPillars endpoint panel.</p>
+          <p><strong>Current source:</strong> <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/notebooks/track1_identity_vs_codec_visualization.ipynb"><code>notebooks/track1_identity_vs_codec_visualization.ipynb</code></a></p>
+          <p><strong>Still missing for a final pass:</strong> one deliberately selected best-case and one failure-case panel with presentation-level captions, consistent framing, and no notebook UI residue.</p>
+        </section>
+
+        <section class="gap-block">
+          <h2>2. Track 2 artifact montage for mask corruption and banding</h2>
+          <p><strong>Status now:</strong> usable Track 2 PNG exports have been pulled into <code>docs/assets/</code>, so the page is no longer missing Track 2 visuals entirely.</p>
+          <p><strong>Current source:</strong> <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/notebooks/track2_codec_root_cause.executed.ipynb"><code>notebooks/track2_codec_root_cause.executed.ipynb</code></a> and <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/src/scripts/analyze_track2_codec_root_cause.py"><code>src/scripts/analyze_track2_codec_root_cause.py</code></a></p>
+          <p><strong>Still missing for a final pass:</strong> one deliberately curated “hero” figure with consistent cropping, caption overlays, and a cleaner typography treatment than notebook-default exports.</p>
+        </section>
+
+        <section class="gap-block">
+          <h2>3. Short GIF of raw/basic versus reconstructed RI evolution</h2>
+          <p><strong>Status now:</strong> the site includes lightweight compare GIFs for Track 1 and Track 2, created from still figure panels.</p>
+          <p><strong>What is still missing:</strong> a true temporal RI animation derived from consecutive frames, ideally raw/basic vs reconstructed with synchronized captions and no notebook framing.</p>
+          <p><strong>Ideal export:</strong> <code>GIF</code> or <code>MP4</code> with synced raw/basic and reconstructed frames plus a tiny caption bar.</p>
+        </section>
+
+        <section class="gap-block">
+          <h2>4. Raw vs identity vs reconstructed point-retention figure</h2>
+          <p><strong>Why it matters:</strong> projection-path sparsification is one of the most important non-obvious findings in the repo, and it deserves a dedicated visual instead of only a text statistic.</p>
+          <p><strong>Current source:</strong> diagnostics described in <a href="https://github.com/Shawn-Kim96/lidar_pointcloud_compression/blob/main/docs/notes/research_progress.md#L279-L307"><code>docs/notes/research_progress.md</code></a> and Track 1 visualization notebooks.</p>
+          <p><strong>Ideal export:</strong> one side-by-side figure for a representative frame: raw point cloud, identity project→unproject, Stage0 recon, Stage1 recon.</p>
+        </section>
+
+        <section class="gap-block">
+          <h2>5. Stage3 head sweep summary once runs settle</h2>
+          <p><strong>Why it matters:</strong> the current page is strongest on diagnosis. A final paper-grade version should also show the next acceptance metric once Stage3 results are stable enough to summarize.</p>
+          <p><strong>Current gap:</strong> the repo has Stage3 code paths and launch artifacts, but not yet a clean final table that is safe to present as a stable outcome.</p>
+        </section>
+
+        <section class="gap-block">
+          <h2>Suggested remote generation workflow</h2>
+          <p>
+            If you want to use the HPC environment later, the most useful remote task is not generic browsing. It is
+            targeted export work: render notebook figures to <code>PNG</code>, export a short GIF, and save those assets
+            into a public-facing folder that can be copied into <code>docs/assets/</code>.
+          </p>
+          <p>
+            Recommended output naming:
+            <code>docs/assets/track1-best-panel.png</code>,
+            <code>docs/assets/track1-failure-panel.png</code>,
+            <code>docs/assets/track2-banding-montage.png</code>,
+            <code>docs/assets/track2-ri-comparison.gif</code>,
+            <code>docs/assets/projection-retention-decomposition.png</code>.
+          </p>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

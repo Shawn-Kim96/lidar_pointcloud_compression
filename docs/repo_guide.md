@@ -32,7 +32,7 @@ The project currently revolves around two downstream tracks:
 
 ### Training entrypoint
 
-- [`src/main_train.py`](/home/018219422/lidar_pointcloud_compression/src/main_train.py)
+- [`src/main_train.py`](../src/main_train.py)
 
 This is the main in-repo entrypoint for codec training. It wires:
 
@@ -44,31 +44,31 @@ This is the main in-repo entrypoint for codec training. It wires:
 
 ### Model code
 
-- [`src/models/compression.py`](/home/018219422/lidar_pointcloud_compression/src/models/compression.py)
+- [`src/models/compression.py`](../src/models/compression.py)
   - top-level compression model assembly
-- [`src/models/autoencoder.py`](/home/018219422/lidar_pointcloud_compression/src/models/autoencoder.py)
+- [`src/models/autoencoder.py`](../src/models/autoencoder.py)
   - encoder / decoder variants
   - coordinate-conditioned decoder
   - skip-connected decoder variants
-- [`src/models/pillar_side.py`](/home/018219422/lidar_pointcloud_compression/src/models/pillar_side.py)
+- [`src/models/pillar_side.py`](../src/models/pillar_side.py)
   - dynamic pillar / BEV side stream
-- [`src/models/quantization.py`](/home/018219422/lidar_pointcloud_compression/src/models/quantization.py)
+- [`src/models/quantization.py`](../src/models/quantization.py)
   - adaptive/uniform quantization
-- [`src/models/stage3_necks.py`](/home/018219422/lidar_pointcloud_compression/src/models/stage3_necks.py)
+- [`src/models/stage3_necks.py`](../src/models/stage3_necks.py)
   - multiscale fusion blocks
 
 ### Dataset code
 
-- [`src/dataset/kitti_object_loader.py`](/home/018219422/lidar_pointcloud_compression/src/dataset/kitti_object_loader.py)
+- [`src/dataset/kitti_object_loader.py`](../src/dataset/kitti_object_loader.py)
   - KITTI range-image dataset
-- [`src/dataset/semantickitti_loader.py`](/home/018219422/lidar_pointcloud_compression/src/dataset/semantickitti_loader.py)
+- [`src/dataset/semantickitti_loader.py`](../src/dataset/semantickitti_loader.py)
   - SemanticKITTI dataset
 
 ### Training/evaluation utilities
 
-- [`src/train/trainer.py`](/home/018219422/lidar_pointcloud_compression/src/train/trainer.py)
+- [`src/train/trainer.py`](../src/train/trainer.py)
   - core training loop
-- [`src/train/evaluate_kitti_map_vs_rate.py`](/home/018219422/lidar_pointcloud_compression/src/train/evaluate_kitti_map_vs_rate.py)
+- [`src/train/evaluate_kitti_map_vs_rate.py`](../src/train/evaluate_kitti_map_vs_rate.py)
   - Track 1-style endpoint evaluation summaries
 
 ## 3. Which Scripts Matter Today
@@ -77,51 +77,51 @@ Many scripts in `src/scripts/` are historical. The ones below are the current im
 
 ### Track 1
 
-- [`run_track1_noquant_chain.sh`](/home/018219422/lidar_pointcloud_compression/src/scripts/run_track1_noquant_chain.sh)
+- [`run_track1_noquant_chain.sh`](../src/scripts/run_track1_noquant_chain.sh)
   - train codec
   - export `KITTI_Identity`
   - fine-tune PointPillars
   - run reconstructed endpoint evaluation
 
-- [`submit_track1_pillar_main.sh`](/home/018219422/lidar_pointcloud_compression/src/scripts/submit_track1_pillar_main.sh)
+- [`submit_track1_pillar_main.sh`](../src/scripts/submit_track1_pillar_main.sh)
   - older pillar/BEV side-stream submitter
 
-- [`submit_track1_pillar_skip_main.sh`](/home/018219422/lidar_pointcloud_compression/src/scripts/submit_track1_pillar_skip_main.sh)
+- [`submit_track1_pillar_skip_main.sh`](../src/scripts/submit_track1_pillar_skip_main.sh)
   - current submitter for pillar-side + skip-decoder Track 1 runs
 
 ### Track 2
 
-- [`run_rangedet_kitti_train.sh`](/home/018219422/lidar_pointcloud_compression/src/scripts/run_rangedet_kitti_train.sh)
+- [`run_rangedet_kitti_train.sh`](../src/scripts/run_rangedet_kitti_train.sh)
   - raw/basic RangeDet training
 
-- [`run_rangedet_raw_eval.sh`](/home/018219422/lidar_pointcloud_compression/src/scripts/run_rangedet_raw_eval.sh)
+- [`run_rangedet_raw_eval.sh`](../src/scripts/run_rangedet_raw_eval.sh)
   - raw/basic evaluation and archive dump
 
-- [`run_rangedet_stage_eval.sh`](/home/018219422/lidar_pointcloud_compression/src/scripts/run_rangedet_stage_eval.sh)
+- [`run_rangedet_stage_eval.sh`](../src/scripts/run_rangedet_stage_eval.sh)
   - reconstructed RI export + RangeDet evaluation
 
-- [`submit_track2_rangedet_patched_chain.sh`](/home/018219422/lidar_pointcloud_compression/src/scripts/submit_track2_rangedet_patched_chain.sh)
+- [`submit_track2_rangedet_patched_chain.sh`](../src/scripts/submit_track2_rangedet_patched_chain.sh)
   - current repaired raw/basic + Stage0/Stage1 chain
 
-- [`submit_track2_rangedet_skip_stage0.sh`](/home/018219422/lidar_pointcloud_compression/src/scripts/submit_track2_rangedet_skip_stage0.sh)
+- [`submit_track2_rangedet_skip_stage0.sh`](../src/scripts/submit_track2_rangedet_skip_stage0.sh)
   - follow-up evaluation for the new skip-decoder Track 1 runs
 
 ### Evaluation utilities
 
-- [`eval_rangedet_archive_car_ap.py`](/home/018219422/lidar_pointcloud_compression/src/scripts/eval_rangedet_archive_car_ap.py)
+- [`eval_rangedet_archive_car_ap.py`](../src/scripts/eval_rangedet_archive_car_ap.py)
   - custom lidar-space car AP used for relative comparison
 
-- [`eval_rangedet_archive_kitti_official.py`](/home/018219422/lidar_pointcloud_compression/src/scripts/eval_rangedet_archive_kitti_official.py)
+- [`eval_rangedet_archive_kitti_official.py`](../src/scripts/eval_rangedet_archive_kitti_official.py)
   - bridge from archived RangeDet outputs to KITTI-style eval
 
-- [`run_rangedet_archive_compare.sh`](/home/018219422/lidar_pointcloud_compression/src/scripts/run_rangedet_archive_compare.sh)
+- [`run_rangedet_archive_compare.sh`](../src/scripts/run_rangedet_archive_compare.sh)
   - combined comparison wrapper
 
 ## 4. Where Outputs Go
 
 ### Training runs
 
-- [`data/results/experiments/`](/home/018219422/lidar_pointcloud_compression/data/results/experiments)
+- [`data/results/experiments/`](../data/results/experiments)
 
 Each run directory typically contains:
 
@@ -131,7 +131,7 @@ Each run directory typically contains:
 
 ### Notebook summaries
 
-- [`notebooks/`](/home/018219422/lidar_pointcloud_compression/notebooks)
+- [`notebooks/`](../notebooks)
 
 Typical files:
 
@@ -142,7 +142,7 @@ Typical files:
 
 ### Logs and manifests
 
-- [`logs/`](/home/018219422/lidar_pointcloud_compression/logs)
+- [`logs/`](../logs)
 
 Typical files:
 
@@ -153,7 +153,7 @@ Typical files:
 
 ### RangeDet archived outputs
 
-- [`logs/rangedet_eval_outputs/`](/home/018219422/lidar_pointcloud_compression/logs/rangedet_eval_outputs)
+- `logs/rangedet_eval_outputs/` when archived detector dumps are present
 
 These `.pkl` files are archived detector outputs used for post-hoc evaluation.
 
@@ -161,7 +161,7 @@ These `.pkl` files are archived detector outputs used for post-hoc evaluation.
 
 ### Chronological record
 
-- [`docs/notes/research_journal_en.md`](/home/018219422/lidar_pointcloud_compression/docs/notes/research_journal_en.md)
+- [`docs/notes/research_journal_en.md`](../docs/notes/research_journal_en.md)
 
 Use this for:
 
@@ -172,7 +172,7 @@ Use this for:
 
 ### Structured reports
 
-- [`docs/report/`](/home/018219422/lidar_pointcloud_compression/docs/report)
+- [`docs/report/`](../docs/report)
 
 Use this for:
 
@@ -182,8 +182,8 @@ Use this for:
 
 ### Visual inspection
 
-- [`notebooks/rangedet_analysis.ipynb`](/home/018219422/lidar_pointcloud_compression/notebooks/rangedet_analysis.ipynb)
-- [`notebooks/track1_identity_vs_codec_visualization.ipynb`](/home/018219422/lidar_pointcloud_compression/notebooks/track1_identity_vs_codec_visualization.ipynb)
+- [`notebooks/rangedet_analysis.ipynb`](../notebooks/rangedet_analysis.ipynb)
+- [`notebooks/track1_identity_vs_codec_visualization.ipynb`](../notebooks/track1_identity_vs_codec_visualization.ipynb)
 
 ## 6. Which Parts Are Historical
 
@@ -203,10 +203,10 @@ If you are trying to understand the current pipeline, prioritize:
 
 ## 7. External Repositories
 
-These directories contain external code that is integrated locally:
+These directories contain external code that is integrated locally when the full research workspace is populated:
 
-- [`third_party/OpenPCDet/`](/home/018219422/lidar_pointcloud_compression/third_party/OpenPCDet)
-- [`third_party/external_range_det/RangeDet/`](/home/018219422/lidar_pointcloud_compression/third_party/external_range_det/RangeDet)
-- [`third_party/external_codecs/RENO/`](/home/018219422/lidar_pointcloud_compression/third_party/external_codecs/RENO)
+- `third_party/OpenPCDet/`
+- `third_party/external_range_det/RangeDet/`
+- `third_party/external_codecs/RENO/`
 
 Do not assume these repositories follow the same conventions as the in-repo code. The supported integration layer is in `src/scripts/` and `src/utils/`.
