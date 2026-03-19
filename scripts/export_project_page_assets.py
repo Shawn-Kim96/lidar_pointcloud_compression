@@ -24,40 +24,105 @@ from PIL import Image
 class ExportSpec:
     notebook_relpath: str
     cell_index: int
+    image_index: int
     filename: str
     description: str
+    web_max_width: int = 1800
+
+
+@dataclass(frozen=True)
+class GifSpec:
+    filename: str
+    frame_names: tuple[str, ...]
+    duration_ms: int
+    max_width: int
 
 
 EXPORT_SPECS = (
     ExportSpec(
         notebook_relpath="notebooks/track1_identity_vs_codec_visualization.ipynb",
         cell_index=7,
+        image_index=0,
         filename="track1-identity-bev-panel.png",
         description="Track 1 identity reconstruction BEV panel",
     ),
     ExportSpec(
         notebook_relpath="notebooks/track1_identity_vs_codec_visualization.ipynb",
         cell_index=8,
+        image_index=0,
         filename="track1-codec-bev-panel.png",
         description="Track 1 codec reconstruction BEV panel",
     ),
     ExportSpec(
         notebook_relpath="notebooks/stage0_stage1_kitti_pointpillar_visualization.executed.ipynb",
         cell_index=6,
+        image_index=0,
         filename="track1-pointpillar-endpoint-panel.png",
         description="Track 1 PointPillars endpoint comparison panel",
     ),
     ExportSpec(
         notebook_relpath="notebooks/rangedet_analysis.executed.ipynb",
         cell_index=4,
+        image_index=0,
         filename="track2-rangedet-overview-panel.png",
         description="Track 2 RangeDet raw versus reconstructed overview panel",
     ),
     ExportSpec(
         notebook_relpath="notebooks/rangedet_analysis.executed.ipynb",
         cell_index=6,
+        image_index=0,
         filename="track2-rangedet-zoom-panel.png",
         description="Track 2 RangeDet zoomed raw versus reconstructed comparison",
+    ),
+    ExportSpec(
+        notebook_relpath="notebooks/rangedet_analysis.executed.ipynb",
+        cell_index=5,
+        image_index=0,
+        filename="track2-cell5-latest.png",
+        description="Track 2 GT-versus-RangeDet envelope comparison panel",
+    ),
+    ExportSpec(
+        notebook_relpath="notebooks/rangedet_analysis.executed.ipynb",
+        cell_index=10,
+        image_index=0,
+        filename="track2-artifact-profiles.png",
+        description="Track 2 artifact profile summary panel",
+        web_max_width=1600,
+    ),
+    ExportSpec(
+        notebook_relpath="notebooks/track2_codec_root_cause.executed.ipynb",
+        cell_index=6,
+        image_index=0,
+        filename="track2-rootcause-worst.png",
+        description="Track 2 worst-case root-cause panel",
+    ),
+    ExportSpec(
+        notebook_relpath="notebooks/track2_codec_root_cause.executed.ipynb",
+        cell_index=6,
+        image_index=1,
+        filename="track2-rootcause-worst-secondary.png",
+        description="Track 2 secondary worst-case root-cause panel",
+    ),
+    ExportSpec(
+        notebook_relpath="notebooks/track2_codec_root_cause.executed.ipynb",
+        cell_index=6,
+        image_index=2,
+        filename="track2-rootcause-median-a.png",
+        description="Track 2 median root-cause panel A",
+    ),
+    ExportSpec(
+        notebook_relpath="notebooks/track2_codec_root_cause.executed.ipynb",
+        cell_index=6,
+        image_index=3,
+        filename="track2-rootcause-median-b.png",
+        description="Track 2 median root-cause panel B",
+    ),
+    ExportSpec(
+        notebook_relpath="notebooks/track2_codec_root_cause.executed.ipynb",
+        cell_index=6,
+        image_index=4,
+        filename="track2-rootcause-median-c.png",
+        description="Track 2 median root-cause panel C",
     ),
 )
 
@@ -67,23 +132,37 @@ WEB_VARIANTS = (
     "track1-pointpillar-endpoint-panel.png",
     "track2-rangedet-overview-panel.png",
     "track2-rangedet-zoom-panel.png",
+    "track2-cell5-latest.png",
+    "track2-artifact-profiles.png",
+    "track2-rootcause-worst.png",
 )
 
 GIF_VARIANTS = (
-    (
-        "track1-identity-vs-codec.gif",
-        ("track1-identity-bev-panel.png", "track1-codec-bev-panel.png"),
-        900,
+    GifSpec(
+        filename="track1-identity-vs-codec.gif",
+        frame_names=("track1-identity-bev-panel.png", "track1-codec-bev-panel.png"),
+        duration_ms=900,
+        max_width=1600,
     ),
-    (
-        "track2-rangedet-overview-zoom.gif",
-        ("track2-rangedet-overview-panel.png", "track2-rangedet-zoom-panel.png"),
-        1050,
+    GifSpec(
+        filename="track2-rangedet-overview-zoom.gif",
+        frame_names=("track2-rangedet-overview-panel.png", "track2-rangedet-zoom-panel.png"),
+        duration_ms=1050,
+        max_width=1600,
+    ),
+    GifSpec(
+        filename="track2-rootcause-spectrum.gif",
+        frame_names=(
+            "track2-rootcause-worst.png",
+            "track2-rootcause-worst-secondary.png",
+            "track2-rootcause-median-a.png",
+            "track2-rootcause-median-b.png",
+            "track2-rootcause-median-c.png",
+        ),
+        duration_ms=1150,
+        max_width=1400,
     ),
 )
-
-MAX_WEB_WIDTH = 1800
-MAX_GIF_WIDTH = 1600
 
 
 def repo_root() -> Path:
@@ -118,7 +197,7 @@ def normalize_png_data(png_data: object) -> str:
     raise TypeError(f"Unsupported image/png payload type: {type(png_data)!r}")
 
 
-def extract_largest_png_bytes(cell: dict, spec: ExportSpec) -> bytes:
+def extract_png_bytes(cell: dict, spec: ExportSpec) -> bytes:
     png_payloads = []
 
     for output in cell.get("outputs", []):
@@ -136,7 +215,13 @@ def extract_largest_png_bytes(cell: dict, spec: ExportSpec) -> bytes:
             f"No PNG outputs found in {spec.notebook_relpath} cell {spec.cell_index}."
         )
 
-    return base64.b64decode(max(png_payloads, key=len))
+    if spec.image_index >= len(png_payloads):
+        raise IndexError(
+            f"{spec.notebook_relpath} cell {spec.cell_index} exposes {len(png_payloads)} PNG outputs; "
+            f"cannot read image index {spec.image_index}."
+        )
+
+    return base64.b64decode(png_payloads[spec.image_index])
 
 
 def export_assets(output_dir: Path) -> list[tuple[ExportSpec, Path]]:
@@ -157,7 +242,7 @@ def export_assets(output_dir: Path) -> list[tuple[ExportSpec, Path]]:
                 f"cannot read cell {spec.cell_index}."
             )
 
-        png_bytes = extract_largest_png_bytes(cells[spec.cell_index], spec)
+        png_bytes = extract_png_bytes(cells[spec.cell_index], spec)
         output_path = output_dir / spec.filename
         output_path.write_bytes(png_bytes)
         exported.append((spec, output_path))
@@ -165,20 +250,26 @@ def export_assets(output_dir: Path) -> list[tuple[ExportSpec, Path]]:
     return exported
 
 
-def build_web_variant(image_path: Path) -> Path:
+def build_web_variant(image_path: Path, max_width: int) -> Path:
     web_path = image_path.with_name(f"{image_path.stem}-web{image_path.suffix}")
     with Image.open(image_path) as image:
-        image = resize_to_max_width(image, MAX_WEB_WIDTH)
+        image = resize_to_max_width(image, max_width)
         image.save(web_path, optimize=True, compress_level=9)
     return web_path
 
 
-def build_gif(output_dir: Path, filename: str, frame_names: tuple[str, ...], duration_ms: int) -> Path:
+def build_gif(
+    output_dir: Path,
+    filename: str,
+    frame_names: tuple[str, ...],
+    duration_ms: int,
+    max_width: int,
+) -> Path:
     frames = []
     for frame_name in frame_names:
         frame_path = output_dir / frame_name
         with Image.open(frame_path) as image:
-            image = resize_to_max_width(image, MAX_GIF_WIDTH)
+            image = resize_to_max_width(image, max_width)
             frames.append(image.convert("P", palette=Image.ADAPTIVE))
 
     output_path = output_dir / filename
@@ -222,26 +313,34 @@ def main() -> int:
             f"({spec.description})"
         )
 
+    spec_by_filename = {spec.filename: spec for spec in EXPORT_SPECS}
+
     for filename in WEB_VARIANTS:
         output_path = output_dir / filename
         if not output_path.exists():
             continue
-        web_path = build_web_variant(output_path)
+        web_path = build_web_variant(output_path, spec_by_filename[filename].web_max_width)
         try:
             display_path = web_path.relative_to(root)
         except ValueError:
             display_path = web_path
         print(f"optimized {display_path} <- {output_path.name}")
 
-    for gif_name, frame_names, duration_ms in GIF_VARIANTS:
-        if not all((output_dir / frame_name).exists() for frame_name in frame_names):
+    for gif_spec in GIF_VARIANTS:
+        if not all((output_dir / frame_name).exists() for frame_name in gif_spec.frame_names):
             continue
-        gif_path = build_gif(output_dir, gif_name, frame_names, duration_ms)
+        gif_path = build_gif(
+            output_dir,
+            gif_spec.filename,
+            gif_spec.frame_names,
+            gif_spec.duration_ms,
+            gif_spec.max_width,
+        )
         try:
             display_path = gif_path.relative_to(root)
         except ValueError:
             display_path = gif_path
-        print(f"animated {display_path} <- {', '.join(frame_names)}")
+        print(f"animated {display_path} <- {', '.join(gif_spec.frame_names)}")
 
     return 0
 
