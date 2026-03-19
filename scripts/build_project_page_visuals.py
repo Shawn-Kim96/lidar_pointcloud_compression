@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Build data-driven visuals for the project page.
 
-This script creates two public-page assets from repository data:
+This script creates a public-page summary chart directly from current results:
 - `downstream-gap-summary.png`: quantitative summary chart from current results
-- `project-hero-montage.png`: hero montage composed from the strongest approved figures
 
 Usage:
     python3 scripts/build_project_page_visuals.py
@@ -19,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-from PIL import Image, ImageDraw, ImageFont
+from PIL import ImageFont
 
 
 @dataclass(frozen=True)
@@ -197,41 +196,6 @@ def build_downstream_gap_summary(summary: MetricsSummary, output_path: Path) -> 
     fig.savefig(output_path, facecolor=fig.get_facecolor())
     plt.close(fig)
 
-
-def _fit_panel(image: Image.Image, size: tuple[int, int], background: str = "#fffdfa") -> Image.Image:
-    canvas = Image.new("RGB", size, background)
-    fitted = image.copy()
-    fitted.thumbnail((size[0] - 24, size[1] - 24), Image.Resampling.LANCZOS)
-    offset = ((size[0] - fitted.width) // 2, (size[1] - fitted.height) // 2)
-    canvas.paste(fitted.convert("RGB"), offset)
-    return canvas
-
-
-def build_hero_montage(assets_dir: Path, chart_path: Path, output_path: Path) -> None:
-    top = Image.open(assets_dir / "track2-rangedet-analysis-preview-web.png").convert("RGB")
-    bottom = Image.open(chart_path).convert("RGB")
-
-    canvas = Image.new("RGB", (1800, 1320), "#f7f2ea")
-    draw = ImageDraw.Draw(canvas)
-    title_font = _load_font(36)
-    label_font = _load_font(24)
-
-    top_panel = _fit_panel(top, (1740, 700))
-    bottom_panel = _fit_panel(bottom, (1740, 470))
-
-    canvas.paste(top_panel, (30, 90))
-    canvas.paste(bottom_panel, (30, 820))
-
-    draw.text((34, 22), "Current detector-facing evidence", fill="#1f2937", font=title_font)
-    draw.rounded_rectangle((48, 110, 520, 150), radius=16, fill="#ffffffdd")
-    draw.text((64, 118), "Direct range-image path: raw/basic vs reconstructed", fill="#0f172a", font=label_font)
-    draw.rounded_rectangle((48, 840, 420, 880), radius=16, fill="#ffffffdd")
-    draw.text((64, 848), "Quantitative gap from experiment tables", fill="#0f172a", font=label_font)
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    canvas.save(output_path, optimize=True)
-
-
 def main() -> int:
     args = parse_args()
     root = repo_root()
@@ -247,10 +211,7 @@ def main() -> int:
 
     chart_path = output_dir / "downstream-gap-summary.png"
     build_downstream_gap_summary(summary, chart_path)
-    build_hero_montage(output_dir, chart_path, output_dir / "project-hero-montage.png")
-
-    print(output_dir / "downstream-gap-summary.png")
-    print(output_dir / "project-hero-montage.png")
+    print(chart_path)
     return 0
 
 

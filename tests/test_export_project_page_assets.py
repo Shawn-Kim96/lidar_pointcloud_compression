@@ -100,6 +100,9 @@ class ExportProjectPageAssetsTests(unittest.TestCase):
     def test_homepage_uses_approved_public_assets(self) -> None:
         index_html = (DOCS_DIR / "index.html").read_text(encoding="utf-8")
 
+        self.assertIn('src="assets/downstream-gap-summary.png"', index_html)
+        self.assertNotIn('src="assets/project-hero-montage.png"', index_html)
+
         for asset_name in (
             "track2-rangedet-analysis-preview-web.png",
             "track1-pointpillar-endpoint-panel-web.png",

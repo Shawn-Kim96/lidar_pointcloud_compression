@@ -38,7 +38,7 @@ class BuildProjectPageVisualsTests(unittest.TestCase):
         self.assertLess(summary.range_reconstructed_best, 0.01)
         self.assertAlmostEqual(summary.projection_retention, 41.69, places=2)
 
-    def test_main_build_generates_chart_and_montage(self) -> None:
+    def test_main_build_generates_summary_chart(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir = Path(tmpdir)
             self.module.main.__wrapped__ if hasattr(self.module.main, "__wrapped__") else None
@@ -48,14 +48,10 @@ class BuildProjectPageVisualsTests(unittest.TestCase):
             )
             chart_path = output_dir / "downstream-gap-summary.png"
             self.module.build_downstream_gap_summary(summary, chart_path)
-            self.module.build_hero_montage(REPO_ROOT / "docs" / "assets", chart_path, output_dir / "project-hero-montage.png")
 
             with Image.open(output_dir / "downstream-gap-summary.png") as image:
                 self.assertGreaterEqual(image.size[0], 1800)
                 self.assertGreaterEqual(image.size[1], 800)
-
-            with Image.open(output_dir / "project-hero-montage.png") as image:
-                self.assertEqual(image.size, (1800, 1320))
 
 
 if __name__ == "__main__":
