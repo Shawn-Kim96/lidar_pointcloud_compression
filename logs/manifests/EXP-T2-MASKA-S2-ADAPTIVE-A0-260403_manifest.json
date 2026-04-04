@@ -1,0 +1,34 @@
+{
+  "experiment_id": "EXP-T2-MASKA-S2-ADAPTIVE-A0-260403",
+  "experiment_name": "t2_maskA_stage2_adaptive_a0",
+  "track": "track2",
+  "branch_id": "maskA_stage2_adaptive_a0",
+  "owner_agent": "eng2",
+  "status": "completed",
+  "classification": "success",
+  "plan_path": "/home/018219422/lidar_pointcloud_compression/docs/report/plans/260403_t2_maskA_stage2_adaptive_a0_plan.md",
+  "summary_path": "/home/018219422/lidar_pointcloud_compression/docs/report/results/260403_t2_maskA_stage2_adaptive_a0_summary.md",
+  "manifest_path": "/home/018219422/lidar_pointcloud_compression/logs/manifests/EXP-T2-MASKA-S2-ADAPTIVE-A0-260403_manifest.json",
+  "raw_log_paths": [
+    "/home/018219422/lidar_pointcloud_compression/logs/260403_t2_maskA_stage2_adaptive_a0_train_29202.out",
+    "/home/018219422/lidar_pointcloud_compression/logs/260403_t2_maskA_stage2_adaptive_a0_ep20_29203.out",
+    "/home/018219422/lidar_pointcloud_compression/logs/260403_t2_maskA_stage2_adaptive_a0_ep40_29204.out",
+    "/home/018219422/lidar_pointcloud_compression/logs/260403_t2_maskA_stage2_adaptive_a0_ep60_29205.out",
+    "/home/018219422/lidar_pointcloud_compression/logs/260403_t2_maskA_stage2_adaptive_a0_ep80_29206.out",
+    "/home/018219422/lidar_pointcloud_compression/logs/260403_t2_maskA_stage2_adaptive_a0_ep80_compare_archive_car_ap_summary.csv",
+    "/home/018219422/lidar_pointcloud_compression/logs/260403_t2_maskA_stage2_adaptive_a0_ep80_compare_kitti_official_summary.csv"
+  ],
+  "checkpoint_path": "/home/018219422/lidar_pointcloud_compression/data/results/experiments/260403_t2_maskA_stage2_adaptive_a0_train/model_final.pth",
+  "metrics": {
+    "headline": "AP3D@0.3=0.2717; AP3D@0.5=0.1539; AP3D@0.7=0.0257; meanBestIoU3D@0.3=0.3611",
+    "compare_archive_csv": "/home/018219422/lidar_pointcloud_compression/logs/260403_t2_maskA_stage2_adaptive_a0_ep80_compare_archive_car_ap_summary.csv",
+    "compare_official_csv": "/home/018219422/lidar_pointcloud_compression/logs/260403_t2_maskA_stage2_adaptive_a0_ep80_compare_kitti_official_summary.csv",
+    "rate_proxy_final": "18.2034",
+    "eq_bits_final": "4.1843"
+  },
+  "submission": {
+    "job_ids": "29202,29203,29204,29205,29206,29207"
+  },
+  "environment_name": "lidarcomp311+rangedet39",
+  "last_updated_at": "2026-04-03T22:26:44Z"
+}

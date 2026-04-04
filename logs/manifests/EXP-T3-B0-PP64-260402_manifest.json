@@ -1,0 +1,23 @@
+{
+  "experiment_id": "EXP-T3-B0-PP64-260402",
+  "experiment_name": "t3_b0_pretrained_val256_pp64",
+  "track": "track3",
+  "branch_id": "t3_b0_pretrained_val256_pp64",
+  "owner_agent": "eng3",
+  "status": "completed",
+  "plan_path": "/home/018219422/lidar_pointcloud_compression/docs/report/plans/260402_t3_b0_pp64_plan.md",
+  "summary_path": "/home/018219422/lidar_pointcloud_compression/docs/report/results/260402_t3_b0_pp64_summary.md",
+  "manifest_path": "/home/018219422/lidar_pointcloud_compression/logs/manifests/EXP-T3-B0-PP64-260402_manifest.json",
+  "raw_log_paths": [
+    "/home/018219422/lidar_pointcloud_compression/logs/260402_t3_b0_pp64_29151.out"
+  ],
+  "checkpoint_path": "/home/018219422/lidar_pointcloud_compression/data/checkpoints/openpcdet_pointpillar_18M.pth",
+  "metrics": {
+    "headline": "true_bpp=3.3648;AP3D_car_mod=70.5157;map3d_mod_mean=35.9167"
+  },
+  "submission": {
+    "job_ids": "29151"
+  },
+  "environment_name": "lidarcomp311",
+  "last_updated_at": "2026-04-03T07:27:34Z"
+}

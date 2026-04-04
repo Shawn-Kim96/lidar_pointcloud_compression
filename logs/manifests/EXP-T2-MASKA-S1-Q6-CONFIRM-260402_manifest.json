@@ -1,0 +1,32 @@
+{
+  "experiment_id": "EXP-T2-MASKA-S1-Q6-CONFIRM-260402",
+  "experiment_name": "t2_maskA_stage1_uniform_q6_confirm",
+  "track": "track2",
+  "branch_id": "maskA_stage1_uniform_q6_confirm",
+  "owner_agent": "eng2",
+  "status": "completed_confirmed",
+  "plan_path": "/home/018219422/lidar_pointcloud_compression/docs/report/plans/260402_t2_maskA_stage1_uniform_q6_confirm_plan.md",
+  "summary_path": "/home/018219422/lidar_pointcloud_compression/docs/report/results/260402_t2_maskA_stage1_uniform_q6_confirm_summary.md",
+  "manifest_path": "/home/018219422/lidar_pointcloud_compression/logs/manifests/EXP-T2-MASKA-S1-Q6-CONFIRM-260402_manifest.json",
+  "raw_log_paths": [
+    "/home/018219422/lidar_pointcloud_compression/logs/260402_t2_maskA_stage1_uniform_q6_confirm_train_29136.out",
+    "/home/018219422/lidar_pointcloud_compression/logs/260402_t2_maskA_stage1_uniform_q6_confirm_ep20_29137.out",
+    "/home/018219422/lidar_pointcloud_compression/logs/260402_t2_maskA_stage1_uniform_q6_confirm_ep40_29138.out",
+    "/home/018219422/lidar_pointcloud_compression/logs/260402_t2_maskA_stage1_uniform_q6_confirm_ep60_29139.out",
+    "/home/018219422/lidar_pointcloud_compression/logs/260402_t2_maskA_stage1_uniform_q6_confirm_ep80_29140.out",
+    "/home/018219422/lidar_pointcloud_compression/logs/260402_t2_maskA_stage1_uniform_q6_confirm_ep80_compare_fixed_archive_car_ap_summary.csv",
+    "/home/018219422/lidar_pointcloud_compression/logs/260402_t2_maskA_stage1_uniform_q6_confirm_ep80_compare_fixed_kitti_official_summary.csv"
+  ],
+  "checkpoint_path": "/home/018219422/lidar_pointcloud_compression/data/results/experiments/260402_t2_maskA_stage1_uniform_q6_confirm_train/model_final.pth",
+  "metrics": {
+    "headline": "AP3D@0.3=0.2492; AP3D@0.5=0.1266; AP3D@0.7=0.0127; meanBestIoU3D@0.3=0.3170",
+    "compare_archive_csv": "/home/018219422/lidar_pointcloud_compression/logs/260402_t2_maskA_stage1_uniform_q6_confirm_ep80_compare_fixed_archive_car_ap_summary.csv",
+    "compare_official_csv": "/home/018219422/lidar_pointcloud_compression/logs/260402_t2_maskA_stage1_uniform_q6_confirm_ep80_compare_fixed_kitti_official_summary.csv"
+  },
+  "submission": {
+    "job_ids": "29136,29137,29138,29139,29140,29141",
+    "correction_job_ids": "29195"
+  },
+  "environment_name": "lidarcomp311+rangedet39",
+  "last_updated_at": "2026-04-03T19:56:55Z"
+}

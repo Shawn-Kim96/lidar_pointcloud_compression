@@ -1,0 +1,16 @@
+flowchart LR
+    A[KITTI Point Clouds] --> B[Track 2 Range Image Projection]
+    B --> C[Mask-aware Codec Family]
+    C --> D[Reconstructed Range Images]
+    D --> E[RangeDet Export]
+    E --> F[Frozen RangeDet Compare]
+    F --> G[Main Thesis Claim]
+
+    A --> H[Track 3 RENO Codec]
+    H --> I[Reconstructed Point Clouds]
+    I --> J[PointPillars Bridge]
+    J --> K[Frozen PointPillars Endpoint]
+    K --> L[Support Evidence]
+
+    G -. protocol discipline .-> M[Mirrored summary / manifest / CSV artifacts]
+    L -. protocol discipline .-> M

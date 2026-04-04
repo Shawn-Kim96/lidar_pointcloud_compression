@@ -1,68 +1,37 @@
-\section{Manuscript Naming Map}\label{apx:naming-map}
-The manuscript uses family names for readability. Internal engineering stage names are mapped in Table~\ref{tab:naming-map} only for reproducibility.
+\section{Artifact Map and Figure Plan}\label{apx:artifacts}
 
-\begin{table}[!htb]
-\caption{Family naming used in the manuscript}
-\label{tab:naming-map}
-\centering
-\small
-\begin{tabular}{l l l}
-\toprule
-\textbf{Family name} & \textbf{Internal stage alias} & \textbf{Core idea} \\
-\midrule
-Uniform Baseline (UB) & Stage0 & uniform quantization with reconstruction-only objective \\
-Adaptive ROI Student (ARS) & Stage1 & adaptive quantization with ROI supervision \\
-Adaptive Distilled Student (ADS) & Stage2 & ARS + teacher-guided distillation \\
-Multi-Scale Distilled Student (MS-ADS) & Stage3 & ADS + stronger multi-scale ROI branch \\
-\bottomrule
-\end{tabular}
-\end{table}
+\subsection{Canonical Result Groups}
+The thesis currently relies on three canonical result groups:
 
-\section{Concept-to-Implementation Traceability}\label{apx:traceability}
-The main body presents theory and evidence. Table~\ref{tab:traceability} provides a conceptual traceability map without repository-specific details.
+\begin{itemize}
+\item \textbf{Track~2 mainline results}: the confirmed Stage~1 result and the bounded Stage~2 adaptive A0 result under the frozen RangeDet compare bundle.
+\item \textbf{Track~3 support baselines}: bounded \(B0\) and \(B1\) operating points at \(posQ=16\) and \(posQ=64\) with paired PointPillars endpoints.
+\item \textbf{Track~3 adaptive attempt}: a bounded dual-\(posQ\) adaptive follow-up that is still in progress and is therefore not yet treated as final evidence in the main body.
+\end{itemize}
 
-\begin{table}[!htb]
-\caption{Traceability from objective terms to implementation components}
-\label{tab:traceability}
-\centering
-\small
-\begin{tabular}{p{0.23\textwidth} p{0.23\textwidth} p{0.43\textwidth}}
-\toprule
-\textbf{Objective term} & \textbf{Equation} & \textbf{Implemented component} \\
-\midrule
-Total objective composition & Eq.~\ref{eq:total-objective} & training loop objective aggregator \\
-Reconstruction MSE & Eq.~\ref{eq:recon-loss} & reconstruction criterion module \\
-Adaptive level mapping & Eq.~\ref{eq:level-map}--\ref{eq:rounded-level} & adaptive quantization module \\
-Rate proxy variants & Eq.~\ref{eq:rate-global}--\ref{eq:rate-norm-bg} & rate regularization module with mode selection \\
-Weighted ROI supervision & Eq.~\ref{eq:imp-bce}--\ref{eq:imp-posweight} & importance supervision module \\
-ROI--BG margin regularization & Eq.~\ref{eq:sep-loss} & importance separation regularizer \\
-Feature/logit distillation & Eq.~\ref{eq:distill-total} & teacher--student distillation module \\
-End-to-end family pipeline & Eq.~\ref{eq:pipeline} & encoder, ROI branch, quantizer, decoder stack \\
-\bottomrule
-\end{tabular}
-\end{table}
+\subsection{Figures Missing From the Current Draft}
+The current draft now includes the following main-body figures:
 
-\section{Experimental Protocol Summary}\label{apx:protocol}
-\begin{table}[!htb]
-\caption{Protocol summary by model family}
-\label{tab:protocol-summary}
-\centering
-\small
-\begin{tabular}{l l l}
-\toprule
-\textbf{Family} & \textbf{Quantization strategy} & \textbf{Supervisory signals} \\
-\midrule
-UB & uniform latent quantization & reconstruction only \\
-ARS & adaptive ROI-aware quantization & reconstruction + ROI supervision + rate regularization \\
-ADS & adaptive ROI-aware quantization & ARS objective + distillation + ROI/BG separation \\
-MS-ADS & adaptive ROI-aware quantization & ADS objective with multi-scale ROI branch variants \\
-\bottomrule
-\end{tabular}
-\end{table}
+\begin{enumerate}
+\item \textbf{Thesis system overview figure}. A clean diagram showing Track~2 as the main claim lane and Track~3 as the support lane, with the frozen downstream evaluators highlighted.
+\item \textbf{Track~2 progression figure}. A compact plot showing Stage~0 winner, Stage~1 recovered, Stage~1 confirm, and Stage~2 adaptive A0 on the same detector-facing axis.
+\item \textbf{Track~3 operating-point figure}. A plot of \(true\ bpp\) versus \(map3d\_mod\_mean\) for \(B0\) and \(B1\) at \(posQ=16\) and \(posQ=64\).
+\item \textbf{Track~3 drift figure}. A small paired comparison showing why the adaptive gate remains open after \(B_{ref}\) is defined.
+\end{enumerate}
 
-Teacher-guided settings use a pretrained PointPillars-based detector teacher. Full-sweep experiments are 150 epochs, and quick diagnostic analyses are performed on a 16-frame subset.
+\subsection{Tables Already Included in the Main Body}
+The current draft also includes two thesis-facing tables in the main body:
+\begin{itemize}
+\item \textbf{Track~2 mainline result table}, covering the Stage~0 winner, Stage~1 recovered run, Stage~1 confirm run, and Stage~2 adaptive A0 result.
+\item \textbf{Track~3 support baseline table}, covering \(B0@16\), \(B0@64\), \(B1@16\), and \(B1@64\) with downstream metrics and bitrate context.
+\end{itemize}
 
-\section{Data Artifacts and Figure Plan}\label{apx:artifacts}
-The quantitative results in this draft are built from three artifact groups: (1) the global experiment ledger, (2) 16-frame quality diagnostics, and (3) native-vs-oracle decomposition summaries.
+\subsection{Optional Stretch Figures}
+If time permits, the next revision should also include:
+\begin{itemize}
+\item a qualitative reconstruction panel for representative LiDAR frames, and
+\item one figure for the bounded Track~3 adaptive attempt, but only after that experiment is canonical.
+\end{itemize}
 
-Figures are intentionally omitted in this revision. The next revision should include (i) precision/recall/IoU threshold sweeps, (ii) matched-budget bitrate--distortion plots, and (iii) qualitative panels showing input channels, ground-truth ROI, predicted importance, and thresholded ROI.
+\subsection{Draft Honesty Policy}
+This revision intentionally prioritizes the required draft sections---abstract, introduction, related work, and method---plus the strongest currently frozen results. Any unfinished adaptive lane should remain explicitly labeled as ongoing validation rather than being silently blended into the final claim.

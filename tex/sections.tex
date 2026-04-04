@@ -1,208 +1,163 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Problem Statement, Research Question, and Contributions}\label{sec:introduction}
-Autonomous driving systems rely on dense LiDAR sensing, but raw point-cloud throughput quickly exceeds practical storage and communication budgets. This thesis studies whether compression can preserve \emph{task-relevant} scene content, rather than only minimizing global reconstruction error.
+\section{Introduction}\label{sec:introduction}
+Autonomous driving systems increasingly depend on high-resolution LiDAR sensing for geometry, free-space reasoning, and three-dimensional object detection. The resulting point clouds are expensive to store, expensive to transmit, and expensive to process repeatedly in large-scale autonomy stacks. This motivates compression, but compression for autonomy cannot be treated as a generic media problem. A codec that preserves average geometric fidelity may still damage the small but semantically important structures that govern downstream driving decisions. In this thesis, the goal is therefore not only to reduce bitrate, but to preserve task-relevant information under a fixed downstream perception protocol.
 
-The core research question is: \emph{Can importance-aware latent quantization improve ROI-relevant reconstruction under constrained bitrate compared with uniform quantization?}
+This thesis focuses on the following research question: \emph{can adaptive LiDAR compression improve downstream utility relative to uniform compression when the evaluator, data split, and detector are all frozen?} The phrase \emph{downstream utility} is important. The thesis does not argue that low reconstruction error alone is sufficient. Instead, it evaluates compression under detector-facing metrics and asks whether adaptive rate allocation can preserve or improve those metrics at a lower effective rate.
 
-For readability, this manuscript reports four model families: \textbf{Uniform Baseline (UB)}, \textbf{Adaptive ROI Student (ARS)}, \textbf{Adaptive Distilled Student (ADS)}, and \textbf{Multi-Scale Distilled Student (MS-ADS)}. Internal engineering stage names are treated as implementation details and omitted from the main narrative.
+To answer that question without overclaiming, the work is organized into two evidence lanes. \textbf{Track~2} is the main thesis path. It starts from KITTI point clouds, projects them into range images, runs an in-repository codec, reconstructs the range image, exports the reconstruction into RangeDet format, and evaluates the result under a frozen RangeDet compare bundle. \textbf{Track~3} is a bounded support path. It uses an external point-cloud-native codec, RENO, reconstructs point clouds directly, and evaluates them under a fixed PointPillars endpoint. Track~2 provides the main claim. Track~3 provides supporting evidence, operating-point context, and a risk-reduction baseline if the main path becomes unstable.
 
-This work contributes: (1) an end-to-end ROI-aware LiDAR range-image compression framework; (2) a loss-design analysis that links objective terms to observed failure modes; and (3) a bottleneck decomposition that separates quantizer potential from importance-map quality.
+The proposed idea is therefore not ``compression for compression's sake,'' but \emph{task-driven adaptive LiDAR compression with frozen downstream evaluation}. In Track~2, the adaptive mechanism operates inside the winning range-image codec family. In Track~3, the adaptive attempt is intentionally bounded and follows baseline closure rather than replacing it. This thesis emphasizes protocol discipline: the evaluator, checkpoints, data splits, and machine-readable artifacts are all fixed so that improvements can be interpreted as model behavior rather than procedural drift.
+
+This thesis makes four contributions. First, it presents a task-driven evaluation framework that distinguishes a main claim lane from a bounded support lane. Second, it shows that the confirmed Track~2 adaptive result improves detector-facing metrics over the confirmed uniform baseline while lowering the internal rate proxy under the same frozen evaluator bundle. Third, it establishes a complete Track~3 support baseline set at two operating points and shows that the corresponding baseline drift is small enough to justify one bounded adaptive follow-up. Fourth, it documents a reproducible artifact discipline for these results, including mirrored summaries, manifests, and machine-readable tables.
+
+The remainder of the thesis is organized as follows. Section~\ref{sec:related_work} reviews prior work in LiDAR compression, task-aware coding, and downstream-aware evaluation. Section~\ref{sec:method} describes the two-lane methodology, fixed evaluator bundles, and adaptive design choices. Section~\ref{sec:setup} summarizes the experimental setup. Section~\ref{sec:results} reports the current Track~2 and Track~3 results that are ready for committee review. Section~\ref{sec:discussion} discusses what these results do and do not establish. Section~\ref{sec:conclusion} concludes with the current thesis claim and the remaining bounded work.
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=\textwidth]{thesis_system_overview_track2_track3.pdf}
+\caption{Current thesis system overview. Track~2 is the main claim lane and Track~3 is the bounded support lane. In both tracks, frozen downstream evaluation is treated as part of the method rather than a post-hoc add-on.}
+\label{fig:thesis-system}
+\end{figure}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Related Work}\label{sec:related_work}
 
-\subsection{Learned LiDAR Compression}
-Classical LiDAR coding pipelines provide strong lossless baselines, but they are not optimized for task-aware distortion allocation~\cite{isenburg2013laszip}. Learned methods improve rate--distortion behavior by modeling geometric regularity in projected representations~\cite{wang2022rangeentropy,liu2024octreedepth}. Temporal predictive coding further reduces redundancy by encoding inter-frame innovation rather than fully independent frames~\cite{fan2024umotion,sun2025lpcm}.
+\subsection{LiDAR Compression Baselines}
+Classical LiDAR compression work established strong lossless and systems-oriented baselines long before downstream-aware learning became common. LASzip showed that even standardized LiDAR formats can benefit from carefully engineered compression without changing the sensing stack~\cite{isenburg2013laszip}. More recent surveys synthesize the broader design space of LiDAR point-cloud compression, including image-based, octree-based, and learned approaches, and emphasize that different deployments care about different trade-offs between bitrate, fidelity, speed, and task behavior~\cite{wang2025compression,abbasi2023lidar}. These works justify why LiDAR compression matters, but they do not by themselves resolve the question of how compression should be optimized when the target is machine perception rather than archival storage.
 
-\subsection{ROI- and Task-Aware Compression}
-Recent task-aware codecs emphasize semantic importance and downstream utility. ROI-guided approaches show that allocating finer quantization to safety-critical regions can preserve perception quality under equal budget~\cite{xie2024roipcgc}. More broadly, scene-aware coding studies report that geometric fidelity alone does not guarantee downstream robustness, motivating objective terms tied to task behavior~\cite{sun2023salpcc,martins2024impact}.
+\subsection{Learned Point-Cloud and Range-Image Compression}
+Learned compression methods have explored several representation choices. Recurrent and residual architectures operating on LiDAR-derived two-dimensional layouts demonstrated that ordered sensor formats can make point-cloud compression more tractable for neural models~\cite{tu2019pointcloud}. Range-image-based entropy models further showed that projected LiDAR representations can perform competitively in autonomous-driving scenes and can be evaluated directly on downstream tasks~\cite{wang2022rangeentropy}. At the point-cloud level, learned machine-perception-oriented compression has also been explored through scalable representations and task-aware octree depth control~\cite{liu2024octreedepth}. For dynamic scenes, predictive and inter-frame coding approaches exploit temporal redundancy and achieve strong compression gains for sequential point clouds~\cite{fan2024umotion,sun2025lpcm,akhtar_inter-frame_2024}. Taken together, these works show that learned LiDAR compression is mature enough to support autonomy use cases, but they also highlight that the exact representation and evaluation choice strongly affects what counts as a meaningful improvement.
 
-\subsection{Distillation-Oriented Guidance}
-Teacher-guided training is often used to transfer richer priors into compact students. In this thesis, distillation is not treated as an end in itself; instead, it is evaluated as a mechanism for improving importance-map calibration and ROI selectivity under aggressive compression.
+\subsection{Task-Aware and Downstream-Aware Compression}
+Several recent works argue that geometry or distortion alone is not a sufficient optimization target for autonomy. Scene-aware and task-driven coding frameworks explicitly incorporate downstream semantics or operating context into compression decisions~\cite{sun2023salpcc}. ROI-guided point-cloud coding further shows that allocating finer quantization to important regions can preserve task-relevant quality under a fixed budget~\cite{xie2024roipcgc}. Empirical studies of object detection under compression also report that point-cloud compression can influence 3D detection performance in ways that are not predictable from geometry metrics alone~\cite{martins2024impact}. These studies strongly motivate the central design choice of this thesis: adaptive compression should be judged against a frozen downstream metric, not just a generic reconstruction metric.
 
-\subsection{Comparison to PointCompress3D}
-PointCompress3D presents a systems-level framework for roadside LiDAR compression and streaming, emphasizing deployment throughput and integrated codec evaluation~\cite{zimmer2024pointcompress3d}. The present thesis is complementary: it focuses on objective design inside a trainable adaptive quantization pipeline and analyzes how loss formulation affects ROI preservation.
+\subsection{Systems Context and Support Baselines}
+For deployment, compression must also be interpretable as part of a larger autonomy system. Real-time and spatio-temporal LiDAR compression systems emphasize throughput, storage, and transmission feasibility in robotic settings~\cite{feng_real-time_2020}. PointCompress3D takes a systems-level view of roadside LiDAR compression and provides a useful external reference point for how a practical compression framework can be positioned in intelligent transportation systems~\cite{zimmer2024pointcompress3d}. The present thesis is complementary rather than identical to those systems works. It does not claim to reproduce every external codec benchmark. Instead, it uses a bounded external codec lane as support evidence while keeping the main claim in a controlled in-repository adaptive compression path.
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Methodology and Model Families}\label{sec:method}
-
-\subsection{Pipeline}
-Each LiDAR scan is projected to a five-channel range image
-\begin{equation}
-\mathbf{x} \in \mathbb{R}^{B\times5\times H\times W},
-\end{equation}
-and processed as
-\begin{equation}
-\mathbf{x} \xrightarrow{\text{encoder}} \mathbf{z} \xrightarrow{\text{importance head}} \mathbf{p} \xrightarrow{\text{adaptive quantizer}} \hat{\mathbf{z}} \xrightarrow{\text{decoder}} \hat{\mathbf{x}}.
-\label{eq:pipeline}
-\end{equation}
-
-The encoder backbone is ResNet-style or DarkNet-style, with latent width 64. In MS-ADS, multi-scale encoder features are additionally consumed by the importance branch.
-
-\subsection{Adaptive Quantization}
-Importance probabilities \(\mathbf{p}\in[0,1]\) control local quantization levels:
-\begin{equation}
-\ell = b_{\mathrm{bg}} + \mathbf{p}\,(b_{\mathrm{roi}}-b_{\mathrm{bg}}),
-\label{eq:level-map}
-\end{equation}
-\begin{equation}
-\tilde{\ell}=\max(2,\mathrm{round}(\ell)).
-\label{eq:rounded-level}
-\end{equation}
-In this design, larger importance means finer local quantization (more levels), so ROI regions are preserved more aggressively than background.
-
-\subsection{Model Families}
-\textbf{UB} uses uniform quantization without ROI guidance. \textbf{ARS} introduces adaptive quantization with ROI supervision. \textbf{ADS} adds teacher-guided distillation to ARS. \textbf{MS-ADS} keeps the ADS objective and replaces the ROI branch with stronger multi-scale designs.
+\subsection{Positioning of This Thesis}
+Relative to prior work, this thesis makes three deliberate choices. First, it separates main evidence from support evidence instead of blending multiple heterogeneous pipelines into one claim. Second, it evaluates the main claim under a frozen downstream detector bundle rather than using only proxy distortion metrics. Third, it treats adaptive follow-ups as bounded, auditable steps that must be justified by stable baseline references. This positioning is narrower than a broad survey paper and less ambitious than a fully new codec standard, but it is appropriate for an MS thesis that aims to make one defensible technical claim supported by reproducible evidence.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Objective and Loss Design}\label{sec:loss}
+\section{Method}\label{sec:method}
 
-\subsection{Unified Objective}
-With reconstruction \(\hat{\mathbf{x}}\), importance logits \(\mathbf{s}\), ROI target \(\mathbf{m}\), and level map \(\tilde{\ell}\), training minimizes
-\begin{equation}
-\mathcal{L}_{\mathrm{total}}=
-\lambda_{\mathrm{recon}}\mathcal{L}_{\mathrm{recon}}+
-\lambda_{\mathrm{distill}}\mathcal{L}_{\mathrm{distill}}+
-\lambda_{\mathrm{rate}}\mathcal{L}_{\mathrm{rate}}+
-\lambda_{\mathrm{imp}}\mathcal{L}_{\mathrm{imp}}+
-\lambda_{\mathrm{sep}}\mathcal{L}_{\mathrm{sep}}.
-\label{eq:total-objective}
-\end{equation}
+\subsection{Two-Lane Thesis Design}
+The thesis is organized around two complementary experimental lanes. Track~2 is the main claim path. Track~3 is a bounded support path. The shared principle is that compression is only meaningful when evaluated under a fixed downstream task.
 
-\subsection{Reconstruction Term}
+In Track~2, the data flow is
 \begin{equation}
-\mathcal{L}_{\mathrm{recon}}=\mathrm{MSE}(\hat{\mathbf{x}},\mathbf{x}).
-\label{eq:recon-loss}
+\text{point cloud} \rightarrow \text{range image} \rightarrow \text{codec} \rightarrow \text{reconstructed range image} \rightarrow \text{RangeDet export} \rightarrow \text{frozen detector compare}.
 \end{equation}
-This term preserves global signal fidelity and anchors all families, including UB.
+In Track~3, the data flow is
+\begin{equation}
+\text{point cloud} \rightarrow \text{RENO codec} \rightarrow \text{reconstructed point cloud} \rightarrow \text{PointPillars endpoint}.
+\end{equation}
+The two tracks serve different thesis roles. Track~2 is the main downstream-aware claim. Track~3 is supporting evidence that tests whether a bounded external codec can preserve downstream utility across operating points.
 
-\subsection{Rate Proxy Term}
-Legacy rate regularization uses
-\begin{equation}
-\mathcal{L}_{\mathrm{rate}}^{\mathrm{global}}=\mathrm{mean}(\tilde{\ell}).
-\label{eq:rate-global}
-\end{equation}
-which can suppress importance if over-weighted. To reduce this conflict, normalized forms are used:
-\begin{equation}
-\ell_{\mathrm{norm}}=\frac{\tilde{\ell}-b_{\mathrm{bg}}}{b_{\mathrm{roi}}-b_{\mathrm{bg}}},
-\label{eq:rate-norm-def}
-\end{equation}
-\begin{equation}
-\mathcal{L}_{\mathrm{rate}}^{\mathrm{norm\mbox{-}global}}=\mathrm{mean}(\ell_{\mathrm{norm}}),
-\label{eq:rate-norm-global}
-\end{equation}
-\begin{equation}
-\mathcal{L}_{\mathrm{rate}}^{\mathrm{norm\mbox{-}bg}}=\frac{\sum(\ell_{\mathrm{norm}}\odot w_{\mathrm{bg}})}{\sum w_{\mathrm{bg}}}.
-\label{eq:rate-norm-bg}
-\end{equation}
-The background-weighted variant reduces pressure on ROI locations while still regularizing bitrate growth.
+\subsection{Track~2 Mainline}
+Track~2 starts from KITTI point clouds and projects them into range images. The codec then reconstructs the range image, after which the reconstruction is exported into the frozen RangeDet evaluation format. The key design rule is that model comparison must not change the evaluator bundle. The data split, RangeDet configuration, model prefix, and compare scripts are frozen. This converts Track~2 into a controlled test of whether adaptive compression helps the downstream detector rather than a test of whether a new evaluator or dataset configuration is easier.
 
-\subsection{Importance Supervision Term}
-Importance is supervised with weighted BCE:
-\begin{equation}
-\mathcal{L}_{\mathrm{imp}}=\mathrm{BCEWithLogits}(\mathbf{s},\mathbf{m};\mathrm{pos\_weight}),
-\label{eq:imp-bce}
-\end{equation}
-\begin{equation}
-\mathrm{pos\_weight}=\mathrm{clip}\!\left(\frac{N_{\mathrm{neg}}}{\max(N_{\mathrm{pos}},1)},1,w_{\max}\right).
-\label{eq:imp-posweight}
-\end{equation}
-This term addresses severe ROI class imbalance after downsampling.
+The current mainline family is the validated mask-aware range-image codec family. Stage~1 confirmed that the winning uniform branch is stable enough to serve as the baseline operating point. Stage~2 then asks a narrower question: can adaptive quantization improve downstream utility while reducing effective rate inside that same family? The answer is obtained by changing the quantization mode and a small number of adaptive parameters while keeping the backbone, decoder, mask head, split, and frozen compare bundle unchanged.
 
-\subsection{ROI--Background Separation Term}
-\begin{equation}
-\mathcal{L}_{\mathrm{sep}}=\max\left(0,\delta-(\mu_{\mathrm{roi}}-\mu_{\mathrm{bg}})\right),
-\label{eq:sep-loss}
-\end{equation}
-where \(\mu_{\mathrm{roi}}\) and \(\mu_{\mathrm{bg}}\) are mean importance over ROI and background. The intent is better decision-margin separation under fixed thresholding.
+\subsection{Track~3 Support Lane}
+Track~3 uses the external RENO codec as a bounded support baseline. Unlike Track~2, it is not the primary thesis claim lane. Its purpose is twofold: first, to provide a point-cloud-native comparison path; second, to reduce the risk that the thesis depends entirely on one internal implementation family. To keep this support lane honest, the thesis requires official baseline closure before any adaptive interpretation is allowed. Specifically, the \(B0\) and \(B1\) operating points at \(posQ\in\{16,64\}\) must each have geometry and downstream PointPillars evidence.
 
-\subsection{Distillation Term}
-\begin{equation}
-\mathcal{L}_{\mathrm{distill}}=\alpha_f\mathcal{L}_f+\alpha_{\ell}\mathcal{L}_{\ell},
-\label{eq:distill-total}
-\end{equation}
-combining feature and logit alignment. For single-channel logits, BCE-style alignment is preferred over KL to avoid degenerate channel-wise behavior.
+The Track~3 adaptive follow-up is intentionally bounded. Rather than claiming a full new RENO architecture, the current adaptive attempt uses a dual-\(posQ\) design in which ROI and background regions are assigned different operating points. This is a defensible thesis-scale intervention because it directly tests adaptive rate allocation while staying close to the already functioning baseline path.
 
-\subsection{Why This Loss Design}
-Loss choices were driven by failure analysis. Collapse cases (empty ROI predictions at standard threshold) motivated replacing raw global rate pressure with normalized variants. ROI sparsity motivated weighted BCE. FP-heavy regimes motivated ROI--background separation. Native-vs-oracle analysis then confirmed that quantization capacity exists, while importance quality remains the limiting factor.
+\subsection{Frozen Protocol and Artifact Discipline}
+The thesis treats protocol stability as part of the method. For Track~2, the frozen evaluator bundle includes the RangeDet configuration, model prefix, test epoch, validation roidb, KITTI infos, and archive compare scripts. For Track~3, the frozen downstream endpoint uses a fixed PointPillars configuration and checkpoint. Every experiment must produce a summary, a manifest, and machine-readable outputs that are mirrored into the main report tree. This artifact discipline is necessary because many negative or positive conclusions in LiDAR compression can be confounded by export bugs, evaluator drift, or stale queue state.
+
+\subsection{Why Adaptive Compression Is The Proposed Idea}
+The proposed idea of the thesis is not merely to train a LiDAR autoencoder. It is to allocate bitrate adaptively in a way that is justified by downstream perception. In Track~2 this appears as adaptive quantization inside the winning mask-aware family. In Track~3 it appears as a bounded adaptive operating-point split between ROI and background under a fixed support baseline. The thesis therefore tests adaptive compression as a practical autonomy question: if the system is only allowed a fixed evaluation protocol and a bounded implementation budget, can adaptive decisions still outperform a uniform baseline in task-facing quality?
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Experimental Setup (Snapshot: February 20, 2026)}\label{sec:setup}
-Training uses SemanticKITTI range-image projections with latent width 64 and adaptive levels \(b_{\mathrm{roi}}=256\), \(b_{\mathrm{bg}}=16\). ARS uses normalized-global rate with weighted BCE; ADS/MS-ADS use background-weighted normalized rate with weighted BCE and separation margin. Distillation uses a pretrained PointPillars-based teacher.
-
-We report two evaluation regimes: (1) full 150-epoch sweeps for convergence behavior and objective-level comparison; (2) 16-frame diagnostics for quick quality and ROI-overlap interpretation.
+\section{Experimental Setup}\label{sec:setup}
+Track~2 uses KITTI point clouds and a frozen RangeDet compare surface. The key Track~2 comparison in this draft is among the winning Stage~0 baseline, the confirmed Stage~1 uniform result, and the bounded Stage~2 adaptive A0 result. Track~3 uses a fixed PointPillars endpoint and reports bounded \(B0\) and \(B1\) operating points at \(posQ=16\) and \(posQ=64\). All results included in this draft correspond to mirrored summaries, manifests, and machine-readable artifacts in the report tree.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Results: Confirmed Findings and Preliminary Stage3}\label{sec:results}
+\section{Current Results}\label{sec:results}
 
-\subsection{Convergence-Level Summary (150 Epochs)}
-Table~\ref{tab:training-summary} reports objective outcomes without run identifiers. The main trend is consistent: for ADS, moderate distillation weight (\(\lambda_{\mathrm{distill}}=0.1\)) outperforms larger values on both backbones.
+\subsection{Track~2 Mainline Result}
+Table~\ref{tab:track2-main} summarizes the main Track~2 progression. The most important observation is that the bounded Stage~2 adaptive A0 run improves over both the Stage~1 confirmed baseline and the earlier Stage~0 winner under the same frozen compare bundle.
 
 \begin{table}[!htb]
-\caption{Training-objective summary after 150 epochs (lower is better within each family objective)}
-\label{tab:training-summary}
+\caption{Track~2 mainline results under the frozen RangeDet compare bundle}
+\label{tab:track2-main}
 \centering
 \small
-\begin{tabular}{l l l c}
+\begin{tabular}{l c c c}
 \toprule
-\textbf{Family} & \textbf{Backbone} & \textbf{Setting} & \textbf{Final objective} \\
+\textbf{Branch} & \textbf{\(AP3D@0.3\)} & \textbf{\(AP3D@0.5\)} & \textbf{\(meanBestIoU3D@0.3\)} \\
 \midrule
-ARS & ResNet & default ARS recipe & 0.7224 \\
-ARS & DarkNet & default ARS recipe & 1.6822 \\
-ADS & ResNet & \(\lambda_d=0.1 / 0.5 / 1.0\) & 1.3821 / 1.9889 / 2.3589 \\
-ADS & DarkNet & \(\lambda_d=0.1 / 0.5 / 1.0\) & 2.1698 / 2.7831 / 3.1329 \\
+Stage~0 maskA winner & 0.1877 & 0.0741 & 0.2418 \\
+Stage~1 recovered & 0.2565 & 0.1293 & 0.3308 \\
+Stage~1 confirm & 0.2492 & 0.1266 & 0.3170 \\
+Stage~2 adaptive A0 & 0.2717 & 0.1539 & 0.3611 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\subsection{Quality Snapshot (16-Frame Diagnostic)}
-Table~\ref{tab:quality-snapshot} shows representative reconstruction behavior in a small diagnostic subset. ARS improves both global and ROI MSE over UB in the shown ResNet setting, while the displayed ADS DarkNet setting remains substantially worse in this snapshot, highlighting that distillation does not automatically guarantee quality gains.
+The confirm rerun is important because it demonstrates that the Stage~1 result is not a one-off artifact. The confirm result remains close to the recovered Stage~1 anchor and clears the closure tolerance. The Stage~2 adaptive A0 result then improves detector-facing metrics further. In particular, \(AP3D@0.3\) rises from \(0.2492\) to \(0.2717\), and \(meanBestIoU3D@0.3\) rises from \(0.3170\) to \(0.3611\). The Track~2 result is therefore strong enough to serve as the main quantitative thesis evidence in the current draft.
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=0.92\textwidth]{track2_mainline_progression.pdf}
+\caption{Track~2 mainline progression under the frozen RangeDet compare bundle. The bounded Stage~2 adaptive A0 branch improves over both the confirmed Stage~1 baseline and the earlier Stage~0 winner.}
+\label{fig:track2-mainline}
+\end{figure}
+
+\subsection{Track~3 Support Baseline Results}
+Table~\ref{tab:track3-baselines} summarizes the current Track~3 support baseline set. These results should not be interpreted as the main claim of the thesis. Instead, they show that the external support lane preserves substantial downstream utility at two operating points and that the \(B0\) and \(B1\) references are stable enough to justify one bounded adaptive follow-up.
 
 \begin{table}[!htb]
-\caption{Representative 16-frame quality snapshot (lower is better)}
-\label{tab:quality-snapshot}
+\caption{Track~3 bounded support baseline results}
+\label{tab:track3-baselines}
 \centering
 \small
-\begin{tabular}{l c c}
+\begin{tabular}{l c c c}
 \toprule
-\textbf{Model variant} & \textbf{All-region MSE} & \textbf{ROI MSE} \\
+\textbf{Branch} & \textbf{true bpp} & \textbf{\(AP3D_{car,mod}\)} & \textbf{\(map3d\_mod\_mean\)} \\
 \midrule
-UB (ResNet, uniform) & 13.4235 & 24.8127 \\
-ARS (ResNet, adaptive) & 10.9570 & 19.8815 \\
-ADS (DarkNet, \(\lambda_d=0.1\)) & 29.5963 & 86.1911 \\
+\(B0@16\) & 8.6341 & 71.8146 & 36.2923 \\
+\(B0@64\) & 3.3648 & 70.5157 & 35.9167 \\
+\(B1@16\) & 8.6323 & 72.2564 & 36.4479 \\
+\(B1@64\) & 3.3264 & 70.7054 & 36.0382 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\subsection{Bottleneck Decomposition: Native vs Oracle ROI}
-To test whether limitations come from the quantizer itself or from ROI estimation quality, native predictions were compared with oracle ROI injection. Table~\ref{tab:oracle-decomp} shows that estimated bitrate proxy drops by about 48\% with oracle control, while ROI MSE remains essentially unchanged.
+The Track~3 baseline reference note is
+\[
+B_{ref,16}=36.4479,\quad B_{ref,64}=36.0382,
+\]
+with
+\[
+drift_{16}=0.0043,\quad drift_{64}=0.0034.
+\]
+Because both drift values are far below the \(0.15\) stop threshold, the bounded adaptive gate remains open.
 
-\begin{table}[!htb]
-\caption{Native vs oracle ROI decomposition (16-frame pilot)}
-\label{tab:oracle-decomp}
+\begin{figure}[!htb]
 \centering
-\small
-\begin{tabular}{l c c c c}
-\toprule
-\textbf{Family} & \textbf{Native bitrate proxy} & \textbf{Oracle bitrate proxy} & \textbf{Reduction} & \textbf{ROI MSE (native/oracle)} \\
-\midrule
-ARS pilot & 0.8064 & 0.4177 & 48.2\% & 227.8031 / 227.8031 \\
-ADS pilot & 0.8687 & 0.4492 & 48.3\% & 227.6069 / 227.6073 \\
-\bottomrule
-\end{tabular}
-\end{table}
+\includegraphics[width=0.82\textwidth]{track3_operating_points.pdf}
+\caption{Track~3 operating points for \(B0\) and \(B1\) at \(posQ=16\) and \(posQ=64\). The support lane already provides a usable operating-point story in terms of downstream utility versus effective bitrate.}
+\label{fig:track3-operating-points}
+\end{figure}
 
-This indicates that current bottlenecks are dominated by importance quality and calibration, not by a fundamental inability of adaptive quantization to reduce bitrate at similar distortion.
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=0.82\textwidth]{track3_bref_drift.pdf}
+\caption{Track~3 baseline-reference stability. The gap between \(B0\) and \(B1\) is small at both operating points, so the bounded adaptive gate remains open.}
+\label{fig:track3-bref}
+\end{figure}
 
-\subsection{Preliminary MS-ADS Results}
-MS-ADS remains preliminary. In the current 150-epoch snapshot, the best variant in both backbones uses a dynamic multi-scale head, with final objective 1.3593 (ResNet) and 2.1863 (DarkNet). These values are encouraging, but detector-level validation and threshold calibration are not yet complete.
+\subsection{Status of the Bounded Track~3 Adaptive Attempt}
+At the time of this draft, the Track~3 adaptive lane is in progress. The current implementation uses a bounded dual-\(posQ\) idea that applies a finer operating point to ROI regions and a coarser operating point to background regions. A 32-frame smoke pass is being used to validate the implementation before spending a full \(val256\) run. The adaptive lane is therefore discussed here only as ongoing validation, not as completed evidence.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Discussion and Limitations}\label{sec:discussion}
-The experiments support three practical conclusions. First, loss redesign substantially improved training stability relative to collapse-prone settings. Second, distillation is useful only in a calibrated range; excessive distillation weight degrades outcomes. Third, oracle decomposition shows large untapped efficiency, implying that improving ROI estimation quality is currently the highest-value direction.
+The current evidence supports two practical conclusions. First, Track~2 already provides a usable main thesis claim: under a frozen downstream compare bundle, the adaptive Stage~2 A0 branch improves detector-facing quality over the confirmed uniform baseline. Second, Track~3 already provides support evidence at multiple operating points, and its baseline drift is small enough to justify one bounded adaptive follow-up. Together, these results are strong enough for an MS thesis draft even before every experimental lane is finished.
 
-Two limitations remain. Fixed-threshold behavior is still unstable across runs, so objective values alone are insufficient for deployment claims. In addition, MS-ADS conclusions are preliminary until detector-facing validation is complete.
+At the same time, several limitations remain. The current draft now includes the essential system, progression, operating-point, and drift figures, but it still lacks a qualitative reconstruction panel and a final Track~3 adaptive figure. The Track~3 adaptive attempt is not yet canonical and therefore should not be overclaimed. Finally, the current manuscript history still contains remnants of an older family-based narrative. The draft should be interpreted as a transition from an earlier exploratory story to a more disciplined two-track thesis story grounded in frozen downstream evaluation.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Conclusion and Next Steps}\label{sec:conclusion}
-This thesis demonstrates that ROI-aware adaptive quantization is a viable direction for LiDAR compression, but practical gains are presently constrained by importance-map calibration rather than quantizer capacity. Confirmed UB/ARS/ADS results and preliminary MS-ADS outcomes collectively point to a clear next step: prioritize robust ROI calibration and detector-level operating-point validation.
+\section{Conclusion}\label{sec:conclusion}
+This thesis argues that LiDAR compression for autonomous driving should be judged by downstream perception behavior, not by generic reconstruction fidelity alone. Using a frozen detector-facing protocol, the thesis finds that the main Track~2 adaptive result improves over both the confirmed Stage~1 baseline and the earlier Stage~0 winner. The bounded Track~3 support lane also preserves substantial downstream utility across two operating points and provides a stable baseline reference for one adaptive follow-up. These findings are sufficient to support the proposed task-driven compression direction in an MS thesis draft. The remaining work is to finish the bounded Track~3 adaptive attempt and convert the current result inventory into final publication-quality figures.
